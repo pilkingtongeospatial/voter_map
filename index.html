@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>US Voter Information Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+/* ── reset & base ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5;
+       display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── header ──────────────────────────────────────────────────────── */
+#header {
+  background: #1a1a2e; color: #eee;
+  padding: 10px 20px; display: flex; align-items: center; gap: 20px;
+  flex-shrink: 0; z-index: 1000;
+}
+#header h1 { font-size: 1.15rem; font-weight: 600; letter-spacing: .5px; }
+#legend { display: flex; gap: 14px; font-size: .78rem; margin-left: auto; align-items: center; }
+.leg-item { display: flex; align-items: center; gap: 5px; }
+.leg-swatch { width: 14px; height: 14px; border-radius: 3px; }
+.leg-r { background: #c0392b; }
+.leg-d { background: #2471a3; }
+.leg-note { color: #aaa; font-size: .72rem; }
+
+/* ── main layout ─────────────────────────────────────────────────── */
+#app { display: flex; flex: 1; overflow: hidden; }
+
+/* ── map ─────────────────────────────────────────────────────────── */
+#map-wrap { position: relative; flex: 1; }
+#map { width: 100%; height: 100%; background: #d6e4f0; }
+
+/* ── inset maps ──────────────────────────────────────────────────── */
+.inset-container {
+  position: absolute; bottom: 34px; z-index: 500;
+  border: 2px solid #888; border-radius: 4px; overflow: hidden;
+  background: #d6e4f0; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+#inset-ak { left: 10px; width: 180px; height: 120px; }
+#inset-hi { left: 198px; width: 130px; height: 120px; }
+.inset-label {
+  position: absolute; top: 3px; left: 5px;
+  background: rgba(255,255,255,.85); font-size: .65rem;
+  font-weight: bold; padding: 1px 4px; border-radius: 2px;
+  pointer-events: none; z-index: 10;
+}
+
+/* ── sidebar ─────────────────────────────────────────────────────── */
+#sidebar {
+  width: 320px; min-width: 280px; background: #fff;
+  border-left: 1px solid #ccc; display: flex; flex-direction: column;
+  overflow-y: auto; flex-shrink: 0;
+}
+#sidebar-content { padding: 18px; flex: 1; }
+#sidebar h2 { font-size: 1.05rem; color: #1a1a2e; margin-bottom: 4px; }
+#sidebar h3 { font-size: .85rem; color: #444; margin: 14px 0 6px;
+              padding-bottom: 4px; border-bottom: 1px solid #eee; }
+.welcome { color: #555; font-size: .88rem; line-height: 1.6; margin-top: 8px; }
+.welcome ul { margin: 8px 0 0 18px; }
+.welcome li { margin-bottom: 4px; }
+
+/* ── info sections ───────────────────────────────────────────────── */
+.info-section { margin-bottom: 12px; }
+.member-card {
+  background: #f8f9fa; border-radius: 6px; padding: 9px 11px;
+  margin-bottom: 7px; font-size: .83rem; line-height: 1.5;
+}
+.member-card a { color: #1a6bb3; text-decoration: none; font-weight: 600; }
+.member-card a:hover { text-decoration: underline; }
+.party-r { color: #c0392b; font-size: .75rem; font-weight: bold; }
+.party-d { color: #2471a3; font-size: .75rem; font-weight: bold; }
+.party-i { color: #7d3c98; font-size: .75rem; font-weight: bold; }
+.reg-link {
+  display: inline-block; background: #1a6bb3; color: #fff;
+  padding: 7px 14px; border-radius: 5px; text-decoration: none;
+  font-size: .83rem; font-weight: 600; margin-top: 4px;
+  transition: background .15s;
+}
+.reg-link:hover { background: #145a9e; }
+.ballotpedia-link {
+  display: inline-block; background: #e67e22; color: #fff;
+  padding: 7px 14px; border-radius: 5px; text-decoration: none;
+  font-size: .83rem; font-weight: 600; margin-top: 4px;
+  transition: background .15s;
+}
+.ballotpedia-link:hover { background: #ca6f1e; }
+
+/* ── back buttons ────────────────────────────────────────────────── */
+.back-btn {
+  background: none; border: 1px solid #ccc; border-radius: 5px;
+  padding: 5px 10px; font-size: .8rem; cursor: pointer; margin-bottom: 12px;
+  color: #444; transition: background .1s;
+}
+.back-btn:hover { background: #f0f0f0; }
+
+/* ── state label markers ─────────────────────────────────────────── */
+.state-label {
+  background: rgba(255,255,255,0.88);
+  color: #222; font-size: 9px; font-weight: 700;
+  padding: 1px 3px; border-radius: 2px;
+  white-space: nowrap; pointer-events: none;
+  line-height: 1.2; text-align: center;
+  border: 1px solid rgba(0,0,0,.15);
+}
+
+/* ── loading overlay ─────────────────────────────────────────────── */
+#loading {
+  position: fixed; inset: 0; background: rgba(255,255,255,.85);
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; z-index: 9999; gap: 14px;
+  font-size: 1rem; color: #333;
+}
+.spinner {
+  width: 42px; height: 42px; border: 4px solid #ddd;
+  border-top-color: #1a6bb3; border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-msg">Loading map data…</div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <h1>US Voter Information Map</h1>
+  <div id="legend">
+    <div class="leg-item"><div class="leg-swatch leg-r"></div>Republican (2024)</div>
+    <div class="leg-item"><div class="leg-swatch leg-d"></div>Democrat (2024)</div>
+    <span class="leg-note">Click a state, then a district</span>
+  </div>
+</div>
+
+<!-- App body -->
+<div id="app">
+  <!-- Map -->
+  <div id="map-wrap">
+    <div id="map"></div>
+    <!-- Alaska inset -->
+    <div class="inset-container" id="inset-ak">
+      <div class="inset-label">Alaska</div>
+    </div>
+    <!-- Hawaii inset -->
+    <div class="inset-container" id="inset-hi">
+      <div class="inset-label">Hawaii</div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="sidebar-content">
+      <div id="panel-welcome">
+        <h2>Welcome</h2>
+        <div class="welcome">
+          <p>Click any state to explore voting information and congressional districts.</p>
+          <ul>
+            <li>States are colored by 2024 Presidential Election result</li>
+            <li>Click a state to zoom in and see congressional districts</li>
+            <li>Click a district to see your representative</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── constants ─────────────────────────────────────────────────────────────────
+
+const PARTY_COLOR = { R: "#c0392b", D: "#2471a3" };
+const PARTY_LABEL = { R: "Republican", D: "Democrat", Independent: "Independent" };
+
+const FIPS_TO_ABBR = {
+  "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT",
+  "10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL",
+  "18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD",
+  "25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE",
+  "32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND",
+  "39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD",
+  "47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV",
+  "55":"WI","56":"WY"
+};
+
+const STATE_CENTROIDS = {
+  "AL":[32.806,-86.791],"AK":[64.2,-153.0],"AZ":[34.048,-111.093],
+  "AR":[34.969,-92.373],"CA":[36.778,-119.418],"CO":[39.113,-105.358],
+  "CT":[41.598,-72.755],"DE":[39.318,-75.507],"FL":[27.994,-81.760],
+  "GA":[32.678,-83.223],"HI":[20.798,-156.331],"ID":[44.068,-114.742],
+  "IL":[40.349,-88.986],"IN":[39.849,-86.258],"IA":[42.011,-93.210],
+  "KS":[38.526,-96.726],"KY":[37.668,-84.670],"LA":[31.169,-91.867],
+  "ME":[44.693,-69.381],"MD":[39.063,-76.802],"MA":[42.230,-71.530],
+  "MI":[44.314,-85.602],"MN":[46.392,-94.636],"MS":[32.741,-89.678],
+  "MO":[38.456,-92.288],"MT":[46.921,-110.454],"NE":[41.492,-99.901],
+  "NV":[38.802,-116.419],"NH":[43.193,-71.572],"NJ":[40.058,-74.405],
+  "NM":[34.307,-106.018],"NY":[42.165,-74.948],"NC":[35.782,-80.793],
+  "ND":[47.528,-99.784],"OH":[40.388,-82.764],"OK":[35.565,-96.928],
+  "OR":[43.804,-120.554],"PA":[41.203,-77.194],"RI":[41.742,-71.477],
+  "SC":[33.836,-81.163],"SD":[44.299,-99.438],"TN":[35.517,-86.580],
+  "TX":[31.054,-97.563],"UT":[39.320,-111.093],"VT":[44.558,-72.577],
+  "VA":[37.431,-78.656],"WA":[47.400,-121.490],"WV":[38.491,-80.954],
+  "WI":[43.784,-88.787],"WY":[43.075,-107.290]
+};
+
+// ── global state ──────────────────────────────────────────────────────────────
+
+let map, akMap, hiMap;
+let statesGJ, cdGJ, legislators, stateMeta;
+let stateLayer = null, cdLayer = null, labelMarkers = [];
+let selectedStateAbbr = null;
+
+// ── map init ──────────────────────────────────────────────────────────────────
+
+map = L.map("map", {
+  center: [39.5, -97.5], zoom: 4, minZoom: 3,
+  zoomControl: true, attributionControl: true
+});
+// light basemap for borders context
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", {
+  attribution: '&copy; <a href="https://carto.com/">CARTO</a> | US Census TIGER | congress-legislators',
+  subdomains: "abcd", maxZoom: 19
+}).addTo(map);
+
+// ── Alaska inset ──────────────────────────────────────────────────────────────
+
+akMap = L.map("inset-ak", {
+  center: [64, -153], zoom: 2, zoomControl: false,
+  attributionControl: false, dragging: false, scrollWheelZoom: false,
+  doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false
+});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  { subdomains: "abcd", maxZoom: 19 }).addTo(akMap);
+
+// ── Hawaii inset ──────────────────────────────────────────────────────────────
+
+hiMap = L.map("inset-hi", {
+  center: [20.5, -157], zoom: 5, zoomControl: false,
+  attributionControl: false, dragging: false, scrollWheelZoom: false,
+  doubleClickZoom: false, boxZoom: false, keyboard: false, touchZoom: false
+});
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+  { subdomains: "abcd", maxZoom: 19 }).addTo(hiMap);
+
+// ── data loading ──────────────────────────────────────────────────────────────
+
+async function loadAll() {
+  const msgs = ["Loading state boundaries…","Loading congressional districts…",
+                "Loading legislator data…","Loading state metadata…"];
+  let i = 0;
+  const loadingMsg = document.getElementById("loading-msg");
+
+  const tick = setInterval(() => {
+    if (i < msgs.length) loadingMsg.textContent = msgs[i++];
+  }, 600);
+
+  [statesGJ, cdGJ, legislators, stateMeta] = await Promise.all([
+    fetch("data/states.geojson").then(r => r.json()),
+    fetch("data/congressional_districts.geojson").then(r => r.json()),
+    fetch("data/legislators.json").then(r => r.json()),
+    fetch("data/state_meta.json").then(r => r.json()),
+  ]);
+
+  clearInterval(tick);
+  document.getElementById("loading").style.display = "none";
+
+  buildStateLayer();
+  buildStateLabels();
+  addInsetStateLayers();
+}
+
+// ── state layer ───────────────────────────────────────────────────────────────
+
+function stateStyle(feat) {
+  const party = feat.properties.party;
+  const color = PARTY_COLOR[party] || "#888";
+  return {
+    fillColor: color, fillOpacity: .55,
+    color: "#fff", weight: 1.5, opacity: 1
+  };
+}
+
+function buildStateLayer() {
+  // Filter out AK and HI from the main map (they appear in insets)
+  const mainFeatures = statesGJ.features.filter(
+    f => f.properties.abbr !== "AK" && f.properties.abbr !== "HI"
+  );
+  const mainGJ = { type: "FeatureCollection", features: mainFeatures };
+
+  stateLayer = L.geoJSON(mainGJ, {
+    style: stateStyle,
+    onEachFeature(feat, layer) {
+      layer.on({
+        mouseover(e) {
+          if (selectedStateAbbr) return;
+          e.target.setStyle({ fillOpacity: .75, weight: 2.5 });
+        },
+        mouseout(e) {
+          if (selectedStateAbbr) return;
+          stateLayer.resetStyle(e.target);
+        },
+        click(e) { onStateClick(feat, layer); }
+      });
+    }
+  }).addTo(map);
+}
+
+function addInsetStateLayers() {
+  // Alaska
+  const akFeat = statesGJ.features.filter(f => f.properties.abbr === "AK");
+  L.geoJSON({ type:"FeatureCollection", features: akFeat }, {
+    style: stateStyle,
+    onEachFeature(feat, layer) { layer.on("click", () => onStateClick(feat, layer)); }
+  }).addTo(akMap);
+
+  // Hawaii
+  const hiFeat = statesGJ.features.filter(f => f.properties.abbr === "HI");
+  L.geoJSON({ type:"FeatureCollection", features: hiFeat }, {
+    style: stateStyle,
+    onEachFeature(feat, layer) { layer.on("click", () => onStateClick(feat, layer)); }
+  }).addTo(hiMap);
+}
+
+// ── state abbreviation labels ─────────────────────────────────────────────────
+
+function buildStateLabels() {
+  // Clear existing
+  labelMarkers.forEach(m => map.removeLayer(m));
+  labelMarkers = [];
+
+  Object.entries(STATE_CENTROIDS).forEach(([abbr, latlng]) => {
+    if (abbr === "AK" || abbr === "HI") return;
+    const icon = L.divIcon({
+      html: `<div class="state-label">${abbr}</div>`,
+      className: "", iconSize: [28,16], iconAnchor: [14,8]
+    });
+    const m = L.marker(latlng, { icon, interactive: false, zIndexOffset: 100 });
+    m.addTo(map);
+    labelMarkers.push(m);
+  });
+}
+
+// ── state click ───────────────────────────────────────────────────────────────
+
+function onStateClick(feat, layer) {
+  const abbr = feat.properties.abbr;
+  if (!abbr) return;
+  selectedStateAbbr = abbr;
+
+  // Zoom to state bounds
+  const bounds = layer.getBounds();
+  map.fitBounds(bounds, { padding: [40,40], maxZoom: 8 });
+
+  // Dim unselected states
+  stateLayer.eachLayer(l => {
+    const a = l.feature.properties.abbr;
+    if (a !== abbr) l.setStyle({ fillOpacity: .15, weight: 1, color: "#ccc" });
+    else l.setStyle({ fillOpacity: 0, weight: 2.5, color: "#fff" });
+  });
+
+  // Remove old CD layer
+  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
+
+  // Add congressional districts for this state
+  const fips = Object.entries(FIPS_TO_ABBR).find(([,v]) => v === abbr)?.[0];
+  if (fips) {
+    const stateFeats = cdGJ.features.filter(
+      f => (f.properties.STATEFP || f.properties.statefp) === fips
+    );
+    if (stateFeats.length) {
+      cdLayer = L.geoJSON({ type:"FeatureCollection", features: stateFeats }, {
+        style(cdFeat) {
+          const cdNum = parseInt(cdFeat.properties.CD118FP || cdFeat.properties.cd118fp || "0") || 0;
+          const rep = ((legislators[abbr] || {}).representatives || {})[String(cdNum)] || null;
+          const party = rep ? (rep.party || "") : "";
+          const fill = party.toLowerCase().includes("republican") ? PARTY_COLOR.R
+                     : party.toLowerCase().includes("democrat")   ? PARTY_COLOR.D
+                     : "#888";
+          return { fillColor: fill, fillOpacity: .55, color: "#fff", weight: 1.5, opacity: 1 };
+        },
+        onEachFeature(cdFeat, cdLayer_) {
+          cdLayer_.on({
+            mouseover(e) { e.target.setStyle({ fillOpacity: .8, weight: 2.5 }); },
+            mouseout(e)  { cdLayer.resetStyle(e.target); },
+            click(e)     { onDistrictClick(cdFeat, abbr); L.DomEvent.stopPropagation(e); }
+          });
+        }
+      }).addTo(map);
+    }
+  }
+
+  showStatePanel(abbr, feat.properties.name);
+}
+
+// ── district click ────────────────────────────────────────────────────────────
+
+function onDistrictClick(feat, stateAbbr) {
+  const props = feat.properties;
+  const cdNum  = parseInt(props.CD118FP || props.cd118fp || "0") || 0;
+  const districtLabel = props.NAMELSAD || props.namelsad || `District ${cdNum}`;
+  showDistrictPanel(stateAbbr, cdNum, districtLabel);
+}
+
+// ── map reset ─────────────────────────────────────────────────────────────────
+
+function resetToNational() {
+  selectedStateAbbr = null;
+  map.flyTo([39.5, -97.5], 4, { duration: 0.8 });
+  stateLayer.eachLayer(l => stateLayer.resetStyle(l));
+  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
+  showWelcomePanel();
+}
+
+// ── sidebar panels ────────────────────────────────────────────────────────────
+
+function showWelcomePanel() {
+  document.getElementById("sidebar-content").innerHTML = `
+    <div id="panel-welcome">
+      <h2>Welcome</h2>
+      <div class="welcome">
+        <p>Click any state to explore voting information and congressional districts.</p>
+        <ul>
+          <li>States are colored by 2024 Presidential Election result</li>
+          <li>Click a state to zoom in and see congressional districts</li>
+          <li>Click a district to see your representative</li>
+        </ul>
+      </div>
+    </div>`;
+}
+
+function partyClass(party) {
+  if (!party) return "";
+  const p = party.toLowerCase();
+  if (p.includes("republican")) return "party-r";
+  if (p.includes("democrat"))   return "party-d";
+  return "party-i";
+}
+
+function showStatePanel(abbr, stateName) {
+  const meta = stateMeta[abbr] || {};
+  const reg  = meta.voter_reg || {};
+  const leg  = legislators[abbr] || {};
+  const senators = leg.senators || [];
+  const reps = leg.representatives || {};
+
+  let senatorsHtml = "";
+  senators.forEach(s => {
+    const cls = partyClass(s.party);
+    senatorsHtml += `
+      <div class="member-card">
+        <a href="${s.url || "#"}" target="_blank" rel="noopener">${s.name}</a><br/>
+        <span class="${cls}">${s.party}</span>
+      </div>`;
+  });
+  if (!senatorsHtml) senatorsHtml = "<p style='color:#888;font-size:.82rem'>No data available.</p>";
+
+  document.getElementById("sidebar-content").innerHTML = `
+    <button class="back-btn" onclick="resetToNational()">&#8592; National View</button>
+    <h2>${stateName}</h2>
+
+    <h3>Register to Vote</h3>
+    <div class="info-section">
+      <a class="reg-link" href="${reg.url || '#'}" target="_blank" rel="noopener">
+        ${reg.name || stateName + ' Voter Registration'}
+      </a>
+    </div>
+
+    <h3>U.S. Senators</h3>
+    <div class="info-section">${senatorsHtml}</div>
+
+    <h3>U.S. Representatives</h3>
+    <div class="info-section">
+      <p style="color:#555;font-size:.83rem;">
+        Click a congressional district on the map to see the representative for that district.
+      </p>
+    </div>
+  `;
+}
+
+function showDistrictPanel(stateAbbr, districtNum, districtLabel) {
+  const meta = stateMeta[stateAbbr] || {};
+  const reg  = meta.voter_reg || {};
+  const leg  = legislators[stateAbbr] || {};
+  const reps = leg.representatives || {};
+
+  const rep = reps[String(districtNum)] || reps["0"] || null;
+  const stateName = Object.entries(FIPS_TO_ABBR).find(([,v]) => v === stateAbbr)?.[1] || stateAbbr;
+
+  let repHtml = "<p style='color:#888;font-size:.82rem'>No data found for this district.</p>";
+  if (rep) {
+    const cls = partyClass(rep.party);
+    repHtml = `
+      <div class="member-card">
+        <a href="${rep.url || '#'}" target="_blank" rel="noopener">${rep.name}</a><br/>
+        <span class="${cls}">${rep.party}</span>
+      </div>`;
+  }
+
+  // Build Ballotpedia URL for 2026 race
+  const stateNames = {
+    "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California",
+    "CO":"Colorado","CT":"Connecticut","DE":"Delaware","FL":"Florida","GA":"Georgia",
+    "HI":"Hawaii","ID":"Idaho","IL":"Illinois","IN":"Indiana","IA":"Iowa",
+    "KS":"Kansas","KY":"Kentucky","LA":"Louisiana","ME":"Maine","MD":"Maryland",
+    "MA":"Massachusetts","MI":"Michigan","MN":"Minnesota","MS":"Mississippi",
+    "MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada",
+    "NH":"New_Hampshire","NJ":"New_Jersey","NM":"New_Mexico","NY":"New_York",
+    "NC":"North_Carolina","ND":"North_Dakota","OH":"Ohio","OK":"Oklahoma",
+    "OR":"Oregon","PA":"Pennsylvania","RI":"Rhode_Island","SC":"South_Carolina",
+    "SD":"South_Dakota","TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont",
+    "VA":"Virginia","WA":"Washington","WV":"West_Virginia","WI":"Wisconsin","WY":"Wyoming"
+  };
+  const bpState = stateNames[stateAbbr] || stateAbbr;
+  const distStr  = districtNum === 0 ? "at_Large" : `${districtNum}th`;
+  const bpUrl    = `https://ballotpedia.org/${bpState}%27s_${distStr}_Congressional_District_election,_2026`;
+
+  document.getElementById("sidebar-content").innerHTML = `
+    <button class="back-btn" onclick="showStatePanel('${stateAbbr}','')">&#8592; ${stateAbbr} Overview</button>
+    <h2>${districtLabel}</h2>
+    <p style="font-size:.78rem;color:#888;margin-bottom:8px;">${stateAbbr} &mdash; 118th Congress boundaries</p>
+
+    <h3>Current Representative</h3>
+    <div class="info-section">${repHtml}</div>
+
+    <h3>2026 Midterm Election</h3>
+    <div class="info-section">
+      <a class="ballotpedia-link" href="${bpUrl}" target="_blank" rel="noopener">
+        View 2026 Candidates on Ballotpedia
+      </a>
+    </div>
+
+    <h3>Register to Vote</h3>
+    <div class="info-section">
+      <a class="reg-link" href="${reg.url || '#'}" target="_blank" rel="noopener">
+        ${reg.name || stateAbbr + ' Voter Registration'}
+      </a>
+    </div>
+  `;
+
+  // Highlight the clicked district
+  if (cdLayer) {
+    cdLayer.eachLayer(l => {
+      const d = parseInt(l.feature.properties.CD118FP || l.feature.properties.cd118fp || "0") || 0;
+      if (d === districtNum) {
+        l.setStyle({ fillOpacity: .85, weight: 3, color: "#ffeb3b" });
+      } else {
+        cdLayer.resetStyle(l);
+      }
+    });
+  }
+}
+
+// Fix for back button inside showStatePanel after district click
+// (need the state name when going back)
+const origShowStatePanel = showStatePanel;
+window.showStatePanelByAbbr = function(abbr) {
+  const feat = statesGJ.features.find(f => f.properties.abbr === abbr);
+  const name = feat ? feat.properties.name : abbr;
+  showStatePanel(abbr, name);
+  // re-highlight the selected state on map
+  stateLayer.eachLayer(l => {
+    const a = l.feature.properties.abbr;
+    if (a !== abbr) l.setStyle({ fillOpacity:.15, weight:1, color:"#ccc" });
+    else l.setStyle({ fillOpacity:.7, weight:2.5, color:"#fff" });
+  });
+  if (cdLayer) cdLayer.eachLayer(l => cdLayer.resetStyle(l));
+};
+
+// Override the back button in district panel to use the improved version
+document.addEventListener("click", e => {
+  // handled inline via onclick attributes
+});
+
+// ── kick off ──────────────────────────────────────────────────────────────────
+
+loadAll().catch(err => {
+  console.error(err);
+  document.getElementById("loading-msg").textContent =
+    "Error loading data. Make sure you are running serve.py and data has been downloaded.";
+});
+</script>
+</body>
+</html>
