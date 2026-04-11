@@ -1,6 +1,18 @@
 """
 Voter Map Data Preparation Script
 Downloads and processes all data needed for the US Voter Information Map.
+
+Produces:
+  data/states.geojson                        State boundaries + 2024 election results
+  data/congressional_districts_119.geojson   119th Congress district boundaries (current)
+  data/congressional_districts.geojson       2026 expected districts (119th + 2025 redistricting)
+  data/legislators.json                      Current legislators by state
+  data/state_meta.json                       Voter registration links + election results
+
+Note: 2025 redistricting ZIP files for CA, MO, NC, OH, TX, UT are not auto-downloaded
+(they come from individual state redistricting bodies). Place them manually in
+data/redistricting_2025/ before running. If absent, both district files will use
+the 119th Congress boundaries.
 """
 
 import os
@@ -8,6 +20,7 @@ import sys
 import json
 import zipfile
 import io
+import shutil
 import urllib.request
 import subprocess
 
@@ -40,6 +53,7 @@ except ImportError:
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR   = os.path.dirname(SCRIPT_DIR)
 DATA_DIR   = os.path.join(ROOT_DIR, "data")
+REDIST_DIR = os.path.join(DATA_DIR, "redistricting_2025")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # ── 2024 election results (Trump=R, Harris=D) ─────────────────────────────────
@@ -109,16 +123,28 @@ VOTER_REG = {
     "WY":{"url":"https://sos.wyo.gov/Elections/","name":"Wyoming Voter Registration"},
 }
 
+# ── 2025 redistricting metadata ───────────────────────────────────────────────
+# Maps FIPS code -> (state abbr, zip filename, shapefile base name inside zip)
+
+REDISTRICTED = {
+    "06": ("CA", "CA_CD_2025.zip", "CA_CD_Prop50"),
+    "29": ("MO", "MO_CD_2025.zip", "MO_CD_MO_First_2025"),
+    "37": ("NC", "NC_CD_2025.zip", "NC_CD_2025"),
+    "39": ("OH", "OH_CD_2025.zip", "OH_CD_10302025"),
+    "48": ("TX", "TX_CD_2025.zip", "TX_CD_PlanC2333"),
+    "49": ("UT", "UT_CD_2025.zip", "UT_CD_CourtOrdered11112025"),
+}
+
 # ── 1. State boundaries ───────────────────────────────────────────────────────
 
-print("\n[1/4] State boundaries")
+print("\n[1/5] State boundaries")
 states_path = os.path.join(DATA_DIR, "states.geojson")
 states_url = (
     "https://raw.githubusercontent.com/PublicaMundi/MappingAPI"
     "/master/data/geojson/us-states.json"
 )
 raw = download(states_url, "states GeoJSON")
-# Inject election result and abbreviation into each feature
+
 STATE_NAME_TO_ABBR = {
     "Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA",
     "Colorado":"CO","Connecticut":"CT","Delaware":"DE","Florida":"FL","Georgia":"GA",
@@ -135,62 +161,132 @@ STATE_NAME_TO_ABBR = {
 }
 states_data = json.loads(raw)
 for feat in states_data["features"]:
-    name = feat["properties"].get("name","")
-    abbr = STATE_NAME_TO_ABBR.get(name,"")
-    feat["properties"]["abbr"]   = abbr
-    feat["properties"]["party"]  = ELECTION_2024.get(abbr,"")
+    name = feat["properties"].get("name", "")
+    abbr = STATE_NAME_TO_ABBR.get(name, "")
+    feat["properties"]["abbr"]  = abbr
+    feat["properties"]["party"] = ELECTION_2024.get(abbr, "")
 with open(states_path, "w") as f:
     json.dump(states_data, f)
 print(f"  Saved {len(states_data['features'])} state features -> data/states.geojson")
 
-# ── 2. Congressional districts ────────────────────────────────────────────────
+# ── 2. 119th Congress district boundaries (current) ──────────────────────────
 
-print("\n[2/4] Congressional district boundaries (118th Congress, 500k scale)")
-cd_path = os.path.join(DATA_DIR, "congressional_districts.geojson")
-cd_url  = (
-    "https://www2.census.gov/geo/tiger/GENZ2022/shp/cb_2022_us_cd118_500k.zip"
-)
-zip_bytes = download(cd_url, "Census TIGER shapefile ZIP (~5 MB)")
+print("\n[2/5] 119th Congress district boundaries (current representation)")
+cd119_path  = os.path.join(DATA_DIR, "congressional_districts_119.geojson")
+local_zip   = os.path.join(DATA_DIR, "cb_2024_us_cd119_500k.zip")
+cd119_url   = "https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_cd119_500k.zip"
+shp_base    = "cb_2024_us_cd119_500k"
+
+if os.path.exists(local_zip):
+    print(f"  Using cached zip: {os.path.relpath(local_zip, ROOT_DIR)}")
+    zip_bytes = open(local_zip, "rb").read()
+else:
+    zip_bytes = download(cd119_url, "Census TIGER 119th Congress ZIP (~16 MB)")
+    with open(local_zip, "wb") as f:
+        f.write(zip_bytes)
+    print(f"  Cached to {os.path.relpath(local_zip, ROOT_DIR)}")
 
 print("  Converting shapefile -> GeoJSON...")
 with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-    base = "cb_2022_us_cd118_500k"
-    shp  = io.BytesIO(z.read(f"{base}.shp"))
-    dbf  = io.BytesIO(z.read(f"{base}.dbf"))
-    shx  = io.BytesIO(z.read(f"{base}.shx"))
-    sf   = shapefile.Reader(shp=shp, dbf=dbf, shx=shx)
-    geojson = sf.__geo_interface__
+    shp = io.BytesIO(z.read(f"{shp_base}.shp"))
+    dbf = io.BytesIO(z.read(f"{shp_base}.dbf"))
+    shx = io.BytesIO(z.read(f"{shp_base}.shx"))
+    sf  = shapefile.Reader(shp=shp, dbf=dbf, shx=shx)
+    cd119_gj = sf.__geo_interface__
 
-with open(cd_path, "w") as f:
-    json.dump(geojson, f)
-print(f"  Saved {len(geojson['features'])} district features -> data/congressional_districts.geojson")
+with open(cd119_path, "w") as f:
+    json.dump(cd119_gj, f)
+print(f"  Saved {len(cd119_gj['features'])} district features -> data/congressional_districts_119.geojson")
 
-# ── 3. Current legislators ────────────────────────────────────────────────────
+# ── 3. 2026 expected districts (119th + 2025 redistricting) ──────────────────
 
-print("\n[3/4] Current legislators")
-leg_url  = (
+print("\n[3/5] 2026 expected districts")
+cd_path = os.path.join(DATA_DIR, "congressional_districts.geojson")
+
+# Determine which redistricting zips are available
+available = {
+    fips: meta for fips, meta in REDISTRICTED.items()
+    if os.path.exists(os.path.join(REDIST_DIR, meta[1]))
+}
+
+if not available:
+    print("  No redistricting ZIPs found in data/redistricting_2025/")
+    print("  Copying 119th Congress file as the 2026 baseline.")
+    shutil.copy(cd119_path, cd_path)
+    print(f"  Saved -> data/congressional_districts.geojson")
+else:
+    print(f"  Redistricting data found for: {', '.join(v[0] for v in available.values())}")
+
+    # Filter out redistricted states from the 119th base
+    kept = [f for f in cd119_gj["features"]
+            if f["properties"].get("STATEFP", "") not in available]
+    print(f"  Kept {len(kept)} features from non-redistricted states")
+
+    # Convert and normalize each redistricting shapefile
+    new_features = []
+    for fips in sorted(available):
+        abbr, zip_name, shp_base_r = available[fips]
+        zip_path = os.path.join(REDIST_DIR, zip_name)
+
+        with zipfile.ZipFile(zip_path) as z:
+            names    = z.namelist()
+            shp_name = next(n for n in names if n.lower() == f"{shp_base_r.lower()}.shp")
+            dbf_name = next(n for n in names if n.lower() == f"{shp_base_r.lower()}.dbf")
+            shx_name = next(n for n in names if n.lower() == f"{shp_base_r.lower()}.shx")
+            shp = io.BytesIO(z.read(shp_name))
+            dbf = io.BytesIO(z.read(dbf_name))
+            shx = io.BytesIO(z.read(shx_name))
+
+        sf  = shapefile.Reader(shp=shp, dbf=dbf, shx=shx)
+        gj  = sf.__geo_interface__
+
+        for feat in gj["features"]:
+            props    = feat["properties"]
+            dist_num = str(int(props.get("DISTRICT", "0")))
+            feat["properties"] = {
+                "STATEFP":  props.get("ST", fips),
+                "CD119FP":  dist_num.zfill(2),
+                "NAMELSAD": props.get("DIST_NAME", f"Congressional District {dist_num}"),
+                "GEOID":    props.get("ST", fips) + dist_num.zfill(2),
+                "CDSESSN":  "119",
+                "SOURCE":   "redistricting_2025",
+            }
+            new_features.append(feat)
+
+        print(f"  {abbr}: {len(gj['features'])} redistricted districts")
+
+    combined = kept + new_features
+    out = {"type": "FeatureCollection", "features": combined}
+    with open(cd_path, "w") as f:
+        json.dump(out, f)
+    print(f"  Saved {len(combined)} total features -> data/congressional_districts.geojson")
+    print(f"  ({len(kept)} unchanged + {len(new_features)} redistricted)")
+
+# ── 4. Current legislators ────────────────────────────────────────────────────
+
+print("\n[4/5] Current legislators")
+leg_url = (
     "https://raw.githubusercontent.com/unitedstates/congress-legislators"
     "/main/legislators-current.yaml"
 )
-leg_raw  = download(leg_url, "legislators-current.yaml")
+leg_raw     = download(leg_url, "legislators-current.yaml")
 legislators = yaml.safe_load(leg_raw)
 
-by_state = {}  # { "AL": { "senators": [...], "representatives": { 1: {...}, ... } } }
-
+by_state = {}
 for leg in legislators:
     terms = leg.get("terms", [])
     if not terms:
         continue
     term  = terms[-1]
-    state = term.get("state","")
-    typ   = term.get("type","")      # "sen" or "rep"
-    party = term.get("party","Unknown")
-    url   = term.get("url","") or ""
-    name_d = leg.get("name",{})
-    full  = name_d.get("official_full","") or f"{name_d.get('first','')} {name_d.get('last','')}".strip()
+    state = term.get("state", "")
+    typ   = term.get("type", "")
+    party = term.get("party", "Unknown")
+    url   = term.get("url", "") or ""
+    name_d = leg.get("name", {})
+    full  = name_d.get("official_full", "") or f"{name_d.get('first','')} {name_d.get('last','')}".strip()
 
     if state not in by_state:
-        by_state[state] = {"senators":[], "representatives":{}}
+        by_state[state] = {"senators": [], "representatives": {}}
 
     info = {"name": full, "party": party, "url": url}
 
@@ -200,24 +296,76 @@ for leg in legislators:
         district = term.get("district", 0) or 0
         by_state[state]["representatives"][str(district)] = info
 
+# ── manual overrides (vacancies & missing data from upstream) ──────────────
+
+MANUAL_REPS = {
+    # Clay Fuller won GA-14 special election April 7, 2026; upstream YAML lags
+    ("GA", "14"): {
+        "name": "Clay Fuller", "party": "Republican",
+        "url": "https://fuller.house.gov",
+    },
+    # Doug LaMalfa (R) died January 6, 2026
+    ("CA", "1"): {
+        "name": "Vacant", "party": "", "url": "",
+        "vacant": True,
+        "vacancy_reason": "Rep. Doug LaMalfa (R) died January 6, 2026. Special election August 4, 2026.",
+    },
+    # Mikie Sherrill (D) resigned November 20, 2025 (won NJ governor's race)
+    ("NJ", "11"): {
+        "name": "Vacant", "party": "", "url": "",
+        "vacant": True,
+        "vacancy_reason": "Rep. Mikie Sherrill (D) resigned November 20, 2025. Special election April 16, 2026.",
+    },
+}
+
+applied = 0
+for (state, dist), info in MANUAL_REPS.items():
+    if state not in by_state:
+        by_state[state] = {"senators": [], "representatives": {}}
+    # Only apply if upstream didn't already fill this seat
+    if dist not in by_state[state]["representatives"]:
+        by_state[state]["representatives"][dist] = info
+        label = info["name"]
+        print(f"  Applied override: {state}-{dist} -> {label}")
+        applied += 1
+if applied:
+    print(f"  ({applied} override(s) applied)")
+else:
+    print("  No overrides needed (all seats filled by upstream data)")
+
 leg_path = os.path.join(DATA_DIR, "legislators.json")
 with open(leg_path, "w") as f:
     json.dump(by_state, f, indent=2)
 print(f"  Saved {len(by_state)} states -> data/legislators.json")
 
-# ── 4. Voter registration + election results ──────────────────────────────────
+# ── 5. Voter registration + election results ──────────────────────────────────
 
-print("\n[4/4] Voter registration links & election results")
+print("\n[5/5] Voter registration links & election results")
 meta_path = os.path.join(DATA_DIR, "state_meta.json")
 meta = {}
 for abbr, reg in VOTER_REG.items():
     meta[abbr] = {
         "voter_reg": reg,
-        "party": ELECTION_2024.get(abbr,""),
+        "party": ELECTION_2024.get(abbr, ""),
     }
 with open(meta_path, "w") as f:
     json.dump(meta, f, indent=2)
 print(f"  Saved metadata for {len(meta)} states -> data/state_meta.json")
 
+# ── summary ───────────────────────────────────────────────────────────────────
+
 print("\nAll data preparation complete!")
 print(f"Data directory: {DATA_DIR}")
+print()
+print("Files produced:")
+for name in [
+    "states.geojson",
+    "congressional_districts_119.geojson",
+    "congressional_districts.geojson",
+    "legislators.json",
+    "state_meta.json",
+]:
+    path = os.path.join(DATA_DIR, name)
+    if os.path.exists(path):
+        size_mb = os.path.getsize(path) / 1_048_576
+        print(f"  {name:<45} {size_mb:6.1f} MB")
