@@ -20,15 +20,17 @@ python scripts/prep_data.py
 This downloads and processes (~80 MB total):
 - State boundary GeoJSON (PublicaMundi / US Census TIGER)
 - 119th Congress district boundaries (US Census TIGER, ~16 MB)
-- 2026 expected district boundaries (119th + 2025 redistricting, ~60 MB)
+- 2026 expected district boundaries: 119th + 2025 redistricting shapefiles auto-downloaded from the [American Redistricting Project](https://thearp.org) for CA, MO, NC, OH, TX, UT (~60 MB)
 - Current legislators (unitedstates/congress-legislators), with manual overrides for known vacancies
 - Voter registration links for all 50 states
 
 Required packages (`pyshp`, `pyyaml`) are installed automatically if missing.
 
-#### 2025 redistricting data (optional)
+#### 2025 redistricting data
 
-Six states had redistricting take effect for 2026: CA, MO, NC, OH, TX, UT. To include the updated boundaries in the "2026 Expected" map view, obtain the redistricting ZIP files for those states and place them in `data/redistricting_2025/` before running the script:
+Six states had redistricting take effect for 2026: CA, MO, NC, OH, TX, UT. Their shapefiles are downloaded automatically from the URLs listed in `scripts/constants.py::REDISTRICTED` into `data/redistricting_2025/` and cached on disk for reuse.
+
+To override the upstream source (e.g. to use a newer enacted map or a court-ordered revision before the URL is updated), drop a replacement ZIP into `data/redistricting_2025/` with the expected filename before running the script — an existing file is always preferred over a fresh download:
 
 | File | State |
 |---|---|
@@ -38,8 +40,6 @@ Six states had redistricting take effect for 2026: CA, MO, NC, OH, TX, UT. To in
 | `OH_CD_2025.zip` | Ohio |
 | `TX_CD_2025.zip` | Texas |
 | `UT_CD_2025.zip` | Utah |
-
-If these files are absent, both map views will use the 119th Congress boundaries.
 
 ### 2. Start the local server
 
