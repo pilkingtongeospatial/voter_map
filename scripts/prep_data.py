@@ -10,10 +10,11 @@ Produces:
   data/legislators.json                      Current legislators by state
   data/state_meta.json                       Voter registration links + election results
 
-Note: 2025 redistricting ZIP files for CA, MO, NC, OH, TX, UT are not auto-downloaded
-(they come from individual state redistricting bodies). Place them manually in
-data/redistricting_2025/ before running. If absent, both district files will use
-the 119th Congress boundaries.
+Note: 2025 redistricting ZIP files for CA, MO, NC, OH, TX, UT are auto-downloaded
+from the American Redistricting Project (URLs in constants.py::REDISTRICTED) and
+cached in data/redistricting_2025/. To override with a newer enacted map, drop a
+replacement ZIP with the expected filename into that directory before running —
+existing files are preferred over a fresh download.
 
 The pipeline logic lives in constants.py, transforms.py, and io_helpers.py;
 this file is just the orchestration and progress reporting.
