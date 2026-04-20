@@ -158,6 +158,23 @@ every exported function.
 
 ## Changelog
 
+### [1.3.0] - 2026-04-19
+#### Changed
+- Inline JavaScript in `index.html` extracted into ES modules under `js/` (`constants.js`, `utils.js`, `panels.js`, `map.js`, `main.js`); `index.html` is now a thin shell that imports `js/main.js` as a module
+- `scripts/prep_data.py` split into a thin orchestrator over pure modules (`constants.py`, `transforms.py`, `io_helpers.py`) guarded by `if __name__ == "__main__"` so imports don't trigger downloads
+- Sidebar panels switched from inline `onclick` handlers to `data-action` attributes with event delegation, so panel generators stay pure (no globals, no `document` access)
+
+#### Added
+- Python unit-test suite (pytest) under `tests/python/` — 51 tests covering constants, pure transforms, and I/O helpers with mocked network/filesystem
+- JavaScript unit-test suite (Vitest) under `tests/js/` — covers constants, utils, and panel HTML generators in a Node environment
+- Version-controlled pre-commit hook (`hooks/pre-commit` + `hooks/install-hooks.sh`) that runs both suites before every commit; soft-skips the JS suite with a warning when Node.js is unavailable so the Python suite still gates the commit
+- `pyproject.toml` (pytest config), `package.json` + `vitest.config.js` (Vitest config), and `.gitattributes` to keep LF line endings on the shell scripts across platforms
+- Development section in this README covering test commands and hook installation
+
+#### Fixed
+- `districtNumFromProps` now uses `"key" in props` existence checks instead of `||` chaining, so at-large districts with `CD119FP: "00"` are no longer mis-read as falsy
+- `ABBR_TO_FIPS` lookup is precomputed once instead of scanning `FIPS_TO_ABBR` with `.find()` on every call
+
 ### [1.2.0] - 2026-04-11
 #### Changed
 - Data files (`data/`) are no longer tracked in git; generated entirely by `prep_data.py`
