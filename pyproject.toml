@@ -1,0 +1,12 @@
+[project]
+name = "voter-map"
+version = "1.2.0"
+description = "US Voter Information Map — data pipeline and web app"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

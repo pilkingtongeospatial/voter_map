@@ -1,0 +1,5 @@
+# Ensure shell scripts keep Unix line endings across platforms so their
+# shebang lines work under Git Bash / MSYS on Windows.
+hooks/pre-commit       text eol=lf
+hooks/install-hooks.sh text eol=lf
+*.sh                   text eol=lf
