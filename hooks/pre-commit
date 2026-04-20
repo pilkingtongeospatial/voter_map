@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Voter Map pre-commit hook.
+#
+# Runs the Python test suite (pytest) and the JavaScript test suite (vitest
+# via npx) before every commit. If either suite fails, the commit is aborted.
+#
+# If Node.js / npm is not installed, the JS suite is skipped with a warning
+# so commits are still gated by the Python tests. Install Node.js to enable
+# the full suite: https://nodejs.org/
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+FAILED=0
+
+# ── Python tests ──────────────────────────────────────────────────────────────
+
+echo "=== pre-commit: Python tests ==="
+if command -v python >/dev/null 2>&1; then
+  if ! python -m pytest tests/python/ -q --tb=short; then
+    FAILED=1
+  fi
+else
+  echo "  python not found on PATH - cannot run Python tests. Commit aborted."
+  exit 1
+fi
+
+# ── JavaScript tests ──────────────────────────────────────────────────────────
+
+echo ""
+echo "=== pre-commit: JavaScript tests ==="
+if command -v npx >/dev/null 2>&1; then
+  # Ensure vitest is installed; run `npm install` if node_modules is missing.
+  if [ ! -d "$REPO_ROOT/node_modules" ]; then
+    echo "  node_modules missing; running 'npm install'..."
+    if ! npm install --silent; then
+      echo "  npm install failed; skipping JS tests."
+      FAILED=1
+    fi
+  fi
+  if [ -d "$REPO_ROOT/node_modules" ]; then
+    if ! npx vitest run --reporter=verbose; then
+      FAILED=1
+    fi
+  fi
+else
+  echo "  npx not found on PATH - skipping JS tests (install Node.js to enable)."
+  echo "  Python tests still gate the commit."
+fi
+
+# ── report ────────────────────────────────────────────────────────────────────
+
+echo ""
+if [ "$FAILED" -ne 0 ]; then
+  echo "Tests failed. Commit aborted."
+  exit 1
+fi
+echo "All tests passed."
+exit 0
