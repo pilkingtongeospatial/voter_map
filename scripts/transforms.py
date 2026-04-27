@@ -162,6 +162,63 @@ def apply_manual_overrides(by_state, overrides):
     return out, applied
 
 
+def flatten_state_legislators(rows):
+    """Transform a list of OpenStates CSV-row dicts into by-state-by-chamber form.
+
+    Each row should have at minimum these keys (the columns OpenStates
+    publishes in `https://data.openstates.org/people/current/<abbr>.csv`):
+
+        id, name, current_party, current_chamber, current_district
+
+    Output structure::
+
+        {
+          "VA": {
+            "upper": { "5":  {"name": "...", "party": "Democratic"}, ... },
+            "lower": { "12": {"name": "...", "party": "Republican"}, ... },
+          },
+          ...
+        }
+
+    Rules:
+      - The state abbr is taken from the OpenStates ``id`` column when
+        callers pre-tag rows with ``state``; otherwise rows without a
+        recognized ``state`` are skipped.
+      - Empty ``current_chamber`` is skipped (caller is assumed to filter,
+        but defensive-skip if not).
+      - District numbers are stored as strings to match shapefile codes
+        like ``"5"`` or ``"12A"`` (some states use letter suffixes).
+      - Multi-member districts: if two rows share the same (state, chamber,
+        district), both names are joined with " / " in display order.
+    """
+    by_state = {}
+    for row in rows or []:
+        state = (row.get("state") or "").strip().upper()
+        chamber = (row.get("current_chamber") or "").strip().lower()
+        district = (row.get("current_district") or "").strip()
+        name = (row.get("name") or "").strip()
+        party = (row.get("current_party") or "Unknown").strip() or "Unknown"
+
+        # Nebraska is unicameral; OpenStates labels its single chamber
+        # as "legislature". Treat it as "upper" so it slots into the
+        # same bucket as state senates everywhere else.
+        if chamber == "legislature":
+            chamber = "upper"
+
+        if not state or chamber not in ("upper", "lower") or not district or not name:
+            continue
+
+        bucket = by_state.setdefault(state, {"upper": {}, "lower": {}})[chamber]
+        if district in bucket:
+            # Multi-member district: append to existing name, preserve party of first
+            existing = bucket[district]
+            existing["name"] = f"{existing['name']} / {name}"
+        else:
+            bucket[district] = {"name": name, "party": party}
+
+    return by_state
+
+
 def build_state_meta(voter_reg, election_results):
     """Combine voter registration + election results into the state_meta structure.
 

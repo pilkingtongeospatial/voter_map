@@ -8,23 +8,48 @@ import {
   addInsetStateLayers,
   buildStateLabels,
   buildCdLayer,
+  buildStateLegLayer,
 } from "./map.js";
 import {
   welcomePanelHtml,
   statePanelHtml,
   districtPanelHtml,
+  stateLegDistrictPanelHtml,
 } from "./panels.js";
-import { districtNumFromProps } from "./utils.js";
+import {
+  districtNumFromProps,
+  stateLegDistrictFromProps,
+  stateLegMeta,
+  hasLowerChamber,
+} from "./utils.js";
 
 // ── mutable module-level state ────────────────────────────────────────────────
 
 let map, akMap, hiMap;
-let statesGJ, cdGJ, cdGJ_119, legislators, stateMeta;
+let statesGJ, cdGJ, cdGJ_119, sldUpperGJ, sldLowerGJ;
+let legislators, stateLegislators, stateMeta;
 let stateLayer = null;
 let cdLayer = null;
+let stateLegLayer = null;
 let labelMarkers = [];
 let selectedStateAbbr = null;
-let viewMode = "current"; // "current" | "2026"
+let viewMode = "current"; // "current" | "2026" | "state_upper" | "state_lower"
+
+const FEDERAL_MODES = new Set(["current", "2026"]);
+const STATE_MODES = new Set(["state_upper", "state_lower"]);
+
+/**
+ * Coerce viewMode to one that's valid for the given state.
+ *  - "state_lower" in a unicameral state (NE) → "state_upper"
+ *  - "state_*"     in a state with no legMeta (DC, territories) → "current"
+ *  - anything else → unchanged
+ */
+function normalizeViewModeForState(abbr, mode) {
+  if (FEDERAL_MODES.has(mode)) return mode;
+  if (!stateLegMeta(abbr)) return "current";
+  if (mode === "state_lower" && !hasLowerChamber(abbr)) return "state_upper";
+  return mode;
+}
 
 // ── panel rendering ───────────────────────────────────────────────────────────
 
@@ -61,12 +86,55 @@ function showDistrict(stateAbbr, districtNum, districtLabel) {
   }
 }
 
+function showStateLegDistrict(stateAbbr, chamber, district) {
+  const meta = stateMeta[stateAbbr] || {};
+  const member = (((stateLegislators[stateAbbr] || {})[chamber]) || {})[district] || null;
+  renderPanel(stateLegDistrictPanelHtml(stateAbbr, chamber, district, member, meta.voter_reg || {}));
+
+  if (stateLegLayer) {
+    stateLegLayer.eachLayer((l) => {
+      const d = stateLegDistrictFromProps(l.feature.properties, chamber);
+      if (d === district) {
+        l.setStyle({ fillOpacity: 0.85, weight: 3, color: "#ffeb3b" });
+      } else {
+        stateLegLayer.resetStyle(l);
+      }
+    });
+  }
+}
+
 // ── map interactions ──────────────────────────────────────────────────────────
+
+function clearDistrictLayers() {
+  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
+  if (stateLegLayer) { map.removeLayer(stateLegLayer); stateLegLayer = null; }
+}
+
+/**
+ * Build whichever district layer matches the current viewMode for the
+ * selected state. Caller is responsible for clearing any prior layers.
+ */
+function buildLayerForCurrentView(abbr) {
+  if (viewMode === "current") {
+    cdLayer = buildCdLayer(map, cdGJ_119, abbr, legislators, { click: onDistrictClick });
+  } else if (viewMode === "2026") {
+    cdLayer = buildCdLayer(map, cdGJ, abbr, legislators, { click: onDistrictClick });
+  } else if (viewMode === "state_upper") {
+    stateLegLayer = buildStateLegLayer(map, sldUpperGJ, abbr, "upper", stateLegislators,
+      { click: onStateLegDistrictClick });
+  } else if (viewMode === "state_lower") {
+    stateLegLayer = buildStateLegLayer(map, sldLowerGJ, abbr, "lower", stateLegislators,
+      { click: onStateLegDistrictClick });
+  }
+}
 
 function onStateClick(feat, layer) {
   const abbr = feat.properties.abbr;
   if (!abbr) return;
   selectedStateAbbr = abbr;
+
+  // Carry the user's mode preference, but normalize for unicameral / no-meta states.
+  viewMode = normalizeViewModeForState(abbr, viewMode);
 
   const bounds = layer.getBounds();
   map.fitBounds(bounds, { padding: [40, 40], maxZoom: 8 });
@@ -77,12 +145,8 @@ function onStateClick(feat, layer) {
     else l.setStyle({ fillOpacity: 0, weight: 2.5, color: "#fff" });
   });
 
-  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
-
-  const source = viewMode === "2026" ? cdGJ : cdGJ_119;
-  cdLayer = buildCdLayer(map, source, abbr, legislators, {
-    click: onDistrictClick,
-  });
+  clearDistrictLayers();
+  buildLayerForCurrentView(abbr);
   showState(abbr, feat.properties.name);
 }
 
@@ -93,34 +157,40 @@ function onDistrictClick(feat, stateAbbr) {
   showDistrict(stateAbbr, cdNum, label);
 }
 
+function onStateLegDistrictClick(feat, stateAbbr, chamber) {
+  const district = stateLegDistrictFromProps(feat.properties, chamber);
+  showStateLegDistrict(stateAbbr, chamber, district);
+}
+
 function resetToNational() {
   selectedStateAbbr = null;
   map.flyTo([39.5, -97.5], 4, { duration: 0.8 });
   stateLayer.eachLayer((l) => stateLayer.resetStyle(l));
-  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
+  clearDistrictLayers();
   showWelcome();
 }
 
 function switchView(mode) {
   if (viewMode === mode) return;
-  viewMode = mode;
-  if (cdLayer) { map.removeLayer(cdLayer); cdLayer = null; }
   if (selectedStateAbbr) {
-    const source = viewMode === "2026" ? cdGJ : cdGJ_119;
-    cdLayer = buildCdLayer(map, source, selectedStateAbbr, legislators, {
-      click: onDistrictClick,
-    });
+    mode = normalizeViewModeForState(selectedStateAbbr, mode);
   }
-  // Update active class on the toggle buttons in the sidebar
-  document.querySelectorAll(".view-toggle button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.mode === mode);
-  });
+  viewMode = mode;
+  clearDistrictLayers();
+  if (selectedStateAbbr) {
+    buildLayerForCurrentView(selectedStateAbbr);
+    // Re-render the sidebar so the toggle's active class + click hint update
+    showState(selectedStateAbbr, stateNameFromAbbr(selectedStateAbbr));
+  }
+}
+
+function stateNameFromAbbr(abbr) {
+  const f = statesGJ.features.find((x) => x.properties.abbr === abbr);
+  return f ? f.properties.name : abbr;
 }
 
 function backToState(abbr) {
-  const feat = statesGJ.features.find((f) => f.properties.abbr === abbr);
-  const name = feat ? feat.properties.name : abbr;
-  showState(abbr, name);
+  showState(abbr, stateNameFromAbbr(abbr));
   // Re-dim non-selected states
   stateLayer.eachLayer((l) => {
     const a = l.feature.properties.abbr;
@@ -128,6 +198,7 @@ function backToState(abbr) {
     else l.setStyle({ fillOpacity: 0.7, weight: 2.5, color: "#fff" });
   });
   if (cdLayer) cdLayer.eachLayer((l) => cdLayer.resetStyle(l));
+  if (stateLegLayer) stateLegLayer.eachLayer((l) => stateLegLayer.resetStyle(l));
 }
 
 // ── delegated event handling for sidebar buttons ──────────────────────────────
@@ -160,8 +231,8 @@ const stateHoverHandlers = {
 async function loadAll() {
   const msgs = [
     "Loading state boundaries…",
-    "Loading current districts…",
-    "Loading 2026 expected districts…",
+    "Loading congressional districts…",
+    "Loading state legislative districts…",
     "Loading legislator data…",
     "Loading state metadata…",
   ];
@@ -171,11 +242,23 @@ async function loadAll() {
     if (i < msgs.length) loadingMsg.textContent = msgs[i++];
   }, 600);
 
-  [statesGJ, cdGJ_119, cdGJ, legislators, stateMeta] = await Promise.all([
+  [
+    statesGJ,
+    cdGJ_119,
+    cdGJ,
+    sldUpperGJ,
+    sldLowerGJ,
+    legislators,
+    stateLegislators,
+    stateMeta,
+  ] = await Promise.all([
     fetch("data/states.geojson").then((r) => r.json()),
     fetch("data/congressional_districts_119.geojson").then((r) => r.json()),
     fetch("data/congressional_districts.geojson").then((r) => r.json()),
+    fetch("data/state_leg_upper.geojson").then((r) => r.json()),
+    fetch("data/state_leg_lower.geojson").then((r) => r.json()),
     fetch("data/legislators.json").then((r) => r.json()),
+    fetch("data/state_legislators.json").then((r) => r.json()),
     fetch("data/state_meta.json").then((r) => r.json()),
   ]);
 
