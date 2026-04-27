@@ -6,6 +6,7 @@ import {
   FIPS_TO_ABBR,
   ABBR_TO_FIPS,
   ABBR_TO_BALLOTPEDIA_STATE,
+  STATE_LEGISLATURE_META,
 } from "./constants.js";
 
 /**
@@ -84,4 +85,88 @@ export function districtNumFromProps(props) {
   else return 0;
   const n = parseInt(raw, 10);
   return Number.isFinite(n) ? n : 0;
+}
+
+// ── State legislature helpers ────────────────────────────────────────────────
+
+/**
+ * Look up the per-state legislature metadata, or null if absent
+ * (DC, territories — they have no STATE_LEGISLATURE_META entry).
+ * @param {string} stateAbbr
+ * @returns {object|null}
+ */
+export function stateLegMeta(stateAbbr) {
+  return STATE_LEGISLATURE_META[stateAbbr] || null;
+}
+
+/**
+ * Whether the state has a lower chamber. False only for Nebraska (unicameral)
+ * and any state with no STATE_LEGISLATURE_META entry.
+ * @param {string} stateAbbr
+ * @returns {boolean}
+ */
+export function hasLowerChamber(stateAbbr) {
+  const m = STATE_LEGISLATURE_META[stateAbbr];
+  return !!(m && m.lower_chamber);
+}
+
+/**
+ * State-correct display name of a chamber, e.g. "Senate of Virginia" or
+ * "California State Assembly". Returns "" if unknown.
+ * @param {string} stateAbbr
+ * @param {"upper"|"lower"} chamber
+ */
+export function chamberDisplayName(stateAbbr, chamber) {
+  const m = STATE_LEGISLATURE_META[stateAbbr];
+  if (!m) return "";
+  return (chamber === "upper" ? m.upper_chamber : m.lower_chamber) || "";
+}
+
+/**
+ * State-correct title prefix for a member, e.g. "Senator", "Delegate",
+ * "Assemblymember". Returns "" if unknown.
+ * @param {string} stateAbbr
+ * @param {"upper"|"lower"} chamber
+ */
+export function memberTitle(stateAbbr, chamber) {
+  const m = STATE_LEGISLATURE_META[stateAbbr];
+  if (!m) return "";
+  return (chamber === "upper" ? m.upper_member : m.lower_member) || "";
+}
+
+/**
+ * Read the state-leg district number from an SLDU/SLDL feature's properties.
+ * Census Cartographic Boundary files use SLDUST (upper) and SLDLST (lower);
+ * the unpadded string is also exposed as NAME. Returns the trimmed string,
+ * which matches OpenStates' current_district format.
+ * @param {object} props GeoJSON feature properties
+ * @param {"upper"|"lower"} chamber
+ * @returns {string}
+ */
+export function stateLegDistrictFromProps(props, chamber) {
+  if (!props) return "";
+  // Prefer NAME (already unpadded). Fall back to SLDUST / SLDLST and strip
+  // leading zeros to match OpenStates ("005" → "5", "12A" → "12A").
+  if (props.NAME) return String(props.NAME).trim();
+  const key = chamber === "upper" ? "SLDUST" : "SLDLST";
+  const raw = props[key];
+  if (raw == null) return "";
+  // Strip leading zeros while preserving any letter suffix (e.g. "012B" -> "12B")
+  return String(raw).replace(/^0+(?=\d)/, "").trim();
+}
+
+/**
+ * Build a Ballotpedia URL for a state-leg district race.
+ *   https://ballotpedia.org/<chamber_url_slug>_District_<district>
+ * @param {string} stateAbbr
+ * @param {"upper"|"lower"} chamber
+ * @param {string|number} district
+ * @returns {string} URL, or "#" if the chamber is unknown
+ */
+export function stateLegBallotpediaUrl(stateAbbr, chamber, district) {
+  const m = STATE_LEGISLATURE_META[stateAbbr];
+  if (!m) return "#";
+  const slug = chamber === "upper" ? m.upper_url_slug : m.lower_url_slug;
+  if (!slug) return "#";
+  return `https://ballotpedia.org/${slug}_District_${district}`;
 }
