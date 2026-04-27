@@ -7,7 +7,10 @@ Produces:
   data/states.geojson                        State boundaries + 2024 election results
   data/congressional_districts_119.geojson   119th Congress district boundaries (current)
   data/congressional_districts.geojson       2026 expected districts (119th + 2025 redistricting)
-  data/legislators.json                      Current legislators by state
+  data/state_leg_upper.geojson               State legislative districts (upper chambers / senates)
+  data/state_leg_lower.geojson               State legislative districts (lower chambers / houses)
+  data/legislators.json                      Current US Congress legislators by state
+  data/state_legislators.json                Current state legislators by state + chamber + district
   data/state_meta.json                       Voter registration links + election results
 
 Note: 2025 redistricting ZIP files for CA, MO, NC, OH, TX, UT are auto-downloaded
@@ -34,6 +37,7 @@ from constants import (  # noqa: E402
     ELECTION_2024,
     VOTER_REG,
     REDISTRICTED,
+    STATE_LEGISLATURE_META,
     STATE_NAME_TO_ABBR,
     MANUAL_REPS,
 )
@@ -49,6 +53,7 @@ from transforms import (  # noqa: E402
     apply_manual_overrides,
     build_state_meta,
     flatten_legislators,
+    flatten_state_legislators,
     merge_cd_geojson,
     normalize_redistricted_feature,
     shapefile_bytes_to_geojson,
@@ -74,7 +79,7 @@ def _ensure_deps():
 # ── pipeline stages ───────────────────────────────────────────────────────────
 
 def stage_states(data_dir):
-    print("\n[1/5] State boundaries")
+    print("\n[1/7] State boundaries")
     states_url = (
         "https://raw.githubusercontent.com/PublicaMundi/MappingAPI"
         "/master/data/geojson/us-states.json"
@@ -89,7 +94,7 @@ def stage_states(data_dir):
 
 
 def stage_cd119(data_dir, root_dir):
-    print("\n[2/5] 119th Congress district boundaries (current representation)")
+    print("\n[2/7] 119th Congress district boundaries (current representation)")
     local_zip = os.path.join(data_dir, "cb_2024_us_cd119_500k.zip")
     url = "https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_cd119_500k.zip"
     shp_base = "cb_2024_us_cd119_500k"
@@ -112,7 +117,7 @@ def stage_cd119(data_dir, root_dir):
 
 
 def stage_cd_2026(cd119_gj, data_dir):
-    print("\n[3/5] 2026 expected districts (119th + redistricting for CA, MO, NC, OH, TX, UT)")
+    print("\n[3/7] 2026 expected districts (119th + redistricting for CA, MO, NC, OH, TX, UT)")
     redist_dir = os.path.join(data_dir, "redistricting_2025")
     os.makedirs(redist_dir, exist_ok=True)
 
@@ -151,7 +156,7 @@ def stage_cd_2026(cd119_gj, data_dir):
 
 
 def stage_legislators(data_dir):
-    print("\n[4/5] Current legislators")
+    print("\n[4/7] Current US Congress legislators")
     import yaml  # imported here so dependency install happens before use
     leg_url = (
         "https://raw.githubusercontent.com/unitedstates/congress-legislators"
@@ -178,8 +183,71 @@ def stage_legislators(data_dir):
     print(f"  Saved {len(by_state)} states -> data/legislators.json")
 
 
+def stage_state_leg_districts(data_dir, root_dir):
+    """Download Census SLDU + SLDL boundaries, write 2 GeoJSONs."""
+    print("\n[5/7] State legislative district boundaries")
+
+    # FIPS code from STATE_NAME_TO_ABBR is via the abbr-keyed map in states.geojson
+    # but here we want abbr lookup keyed by STATEFP — done at consume time on the
+    # frontend using FIPS_TO_ABBR. Pipeline just produces all-states GeoJSONs.
+
+    layers = [
+        ("upper", "cb_2024_us_sldu_500k", "state_leg_upper.geojson",
+         "Census TIGER state legislative upper (~22 MB)"),
+        ("lower", "cb_2024_us_sldl_500k", "state_leg_lower.geojson",
+         "Census TIGER state legislative lower (~28 MB)"),
+    ]
+    for chamber, base, out_name, label in layers:
+        local_zip = os.path.join(data_dir, f"{base}.zip")
+        url = f"https://www2.census.gov/geo/tiger/GENZ2024/shp/{base}.zip"
+
+        cached = os.path.exists(local_zip)
+        zip_bytes = read_or_download(local_zip, url, label)
+        if cached:
+            print(f"  {chamber}: using cached {os.path.relpath(local_zip, root_dir)}")
+        else:
+            print(f"  {chamber}: cached to {os.path.relpath(local_zip, root_dir)}")
+
+        shp, dbf, shx = read_zip_shapefile(zip_bytes, shp_base=base)
+        gj = shapefile_bytes_to_geojson(shp, dbf, shx)
+        path = os.path.join(data_dir, out_name)
+        write_json(path, gj)
+        print(f"  {chamber}: saved {len(gj['features'])} features -> data/{out_name}")
+
+
+def stage_state_legislators(data_dir):
+    """Download per-state OpenStates CSVs, flatten to one JSON keyed by state."""
+    print("\n[6/7] Current state legislators (OpenStates)")
+    import csv  # stdlib
+    from io import StringIO
+
+    rows = []
+    abbrs = sorted(STATE_LEGISLATURE_META.keys())
+    for abbr in abbrs:
+        url = f"https://data.openstates.org/people/current/{abbr.lower()}.csv"
+        try:
+            raw = download(url, f"OpenStates {abbr}")
+        except Exception as e:  # network / 404
+            print(f"  {abbr}: skipped ({e})")
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        reader = csv.DictReader(StringIO(text))
+        n_before = len(rows)
+        for row in reader:
+            row["state"] = abbr  # tag for the transform
+            rows.append(row)
+        print(f"  {abbr}: {len(rows) - n_before} legislators")
+
+    by_state = flatten_state_legislators(rows)
+    path = os.path.join(data_dir, "state_legislators.json")
+    write_json(path, by_state, indent=2)
+
+    total = sum(len(s.get("upper", {})) + len(s.get("lower", {})) for s in by_state.values())
+    print(f"  Saved {total} legislators across {len(by_state)} states -> data/state_legislators.json")
+
+
 def stage_state_meta(data_dir):
-    print("\n[5/5] Voter registration links & election results")
+    print("\n[7/7] Voter registration links & election results")
     meta = build_state_meta(VOTER_REG, ELECTION_2024)
     path = os.path.join(data_dir, "state_meta.json")
     write_json(path, meta, indent=2)
@@ -195,7 +263,10 @@ def _print_summary(data_dir):
         "states.geojson",
         "congressional_districts_119.geojson",
         "congressional_districts.geojson",
+        "state_leg_upper.geojson",
+        "state_leg_lower.geojson",
         "legislators.json",
+        "state_legislators.json",
         "state_meta.json",
     ]:
         path = os.path.join(data_dir, name)
@@ -214,6 +285,8 @@ def main():
     cd119_gj = stage_cd119(data_dir, root_dir)
     stage_cd_2026(cd119_gj, data_dir)
     stage_legislators(data_dir)
+    stage_state_leg_districts(data_dir, root_dir)
+    stage_state_legislators(data_dir)
     stage_state_meta(data_dir)
     _print_summary(data_dir)
 
