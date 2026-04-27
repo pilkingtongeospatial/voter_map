@@ -13,3 +13,7 @@ htmlcov/
 node_modules/
 _smoke.py
 _rewrite.py
+
+# Personal manual-validation worksheet (regenerate with gen_validation.py)
+gen_validation.py
+validation.csv
