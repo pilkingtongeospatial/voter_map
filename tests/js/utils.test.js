@@ -7,6 +7,12 @@ import {
   fipsToAbbr,
   ballotpediaUrl,
   districtNumFromProps,
+  stateLegMeta,
+  hasLowerChamber,
+  chamberDisplayName,
+  memberTitle,
+  stateLegDistrictFromProps,
+  stateLegBallotpediaUrl,
 } from "../../js/utils.js";
 
 describe("partyClass", () => {
@@ -127,5 +133,125 @@ describe("districtNumFromProps", () => {
   });
   it("returns 0 for non-numeric values", () => {
     expect(districtNumFromProps({ CD119FP: "ZZ" })).toBe(0);
+  });
+});
+
+// ── state-legislature helpers ────────────────────────────────────────────────
+
+describe("stateLegMeta", () => {
+  it("returns the meta object for a known state", () => {
+    const m = stateLegMeta("VA");
+    expect(m).not.toBeNull();
+    expect(m.body).toBe("Virginia General Assembly");
+  });
+  it("returns null for unknown / non-state codes", () => {
+    expect(stateLegMeta("DC")).toBeNull();
+    expect(stateLegMeta("ZZ")).toBeNull();
+  });
+});
+
+describe("hasLowerChamber", () => {
+  it("is true for normal bicameral states", () => {
+    expect(hasLowerChamber("VA")).toBe(true);
+    expect(hasLowerChamber("CA")).toBe(true);
+  });
+  it("is false for unicameral Nebraska", () => {
+    expect(hasLowerChamber("NE")).toBe(false);
+  });
+  it("is false for states with no meta entry (DC, territories)", () => {
+    expect(hasLowerChamber("DC")).toBe(false);
+  });
+});
+
+describe("chamberDisplayName", () => {
+  it("returns 'Senate of Virginia' for VA upper", () => {
+    expect(chamberDisplayName("VA", "upper")).toBe("Senate of Virginia");
+  });
+  it("returns 'Virginia House of Delegates' for VA lower", () => {
+    expect(chamberDisplayName("VA", "lower")).toBe("Virginia House of Delegates");
+  });
+  it("returns 'California State Assembly' for CA lower", () => {
+    expect(chamberDisplayName("CA", "lower")).toBe("California State Assembly");
+  });
+  it("returns 'Nebraska Legislature' for NE upper", () => {
+    expect(chamberDisplayName("NE", "upper")).toBe("Nebraska Legislature");
+  });
+  it("returns '' for NE lower (unicameral)", () => {
+    expect(chamberDisplayName("NE", "lower")).toBe("");
+  });
+  it("returns '' for unknown state", () => {
+    expect(chamberDisplayName("DC", "upper")).toBe("");
+    expect(chamberDisplayName("ZZ", "upper")).toBe("");
+  });
+});
+
+describe("memberTitle", () => {
+  it("returns 'Senator' for upper chambers", () => {
+    expect(memberTitle("VA", "upper")).toBe("Senator");
+    expect(memberTitle("CA", "upper")).toBe("Senator");
+  });
+  it("returns 'Delegate' for VA/MD/WV lower", () => {
+    expect(memberTitle("VA", "lower")).toBe("Delegate");
+    expect(memberTitle("MD", "lower")).toBe("Delegate");
+    expect(memberTitle("WV", "lower")).toBe("Delegate");
+  });
+  it("returns 'Assemblymember' for CA/NY/NV/NJ lower", () => {
+    expect(memberTitle("CA", "lower")).toBe("Assemblymember");
+    expect(memberTitle("NY", "lower")).toBe("Assemblymember");
+    expect(memberTitle("NV", "lower")).toBe("Assemblymember");
+    expect(memberTitle("NJ", "lower")).toBe("Assemblymember");
+  });
+  it("returns 'Representative' for typical states", () => {
+    expect(memberTitle("OH", "lower")).toBe("Representative");
+    expect(memberTitle("TX", "lower")).toBe("Representative");
+  });
+  it("returns '' for missing chambers and unknown states", () => {
+    expect(memberTitle("NE", "lower")).toBe("");
+    expect(memberTitle("DC", "upper")).toBe("");
+  });
+});
+
+describe("stateLegDistrictFromProps", () => {
+  it("prefers NAME when present", () => {
+    expect(stateLegDistrictFromProps({ NAME: "5", SLDUST: "005" }, "upper")).toBe("5");
+  });
+  it("strips leading zeros from SLDUST when NAME is missing", () => {
+    expect(stateLegDistrictFromProps({ SLDUST: "005" }, "upper")).toBe("5");
+  });
+  it("strips leading zeros from SLDLST for lower chamber", () => {
+    expect(stateLegDistrictFromProps({ SLDLST: "012" }, "lower")).toBe("12");
+  });
+  it("preserves letter suffixes on multi-member districts", () => {
+    expect(stateLegDistrictFromProps({ SLDLST: "012B" }, "lower")).toBe("12B");
+  });
+  it("returns '' on null / missing props", () => {
+    expect(stateLegDistrictFromProps(null, "upper")).toBe("");
+    expect(stateLegDistrictFromProps({}, "upper")).toBe("");
+  });
+});
+
+describe("stateLegBallotpediaUrl", () => {
+  it("builds VA upper district URL", () => {
+    expect(stateLegBallotpediaUrl("VA", "upper", "5"))
+      .toBe("https://ballotpedia.org/Virginia_State_Senate_District_5");
+  });
+  it("builds VA lower district URL with House of Delegates slug", () => {
+    expect(stateLegBallotpediaUrl("VA", "lower", "12"))
+      .toBe("https://ballotpedia.org/Virginia_House_of_Delegates_District_12");
+  });
+  it("builds CA lower URL with State Assembly slug", () => {
+    expect(stateLegBallotpediaUrl("CA", "lower", "10"))
+      .toBe("https://ballotpedia.org/California_State_Assembly_District_10");
+  });
+  it("builds NE upper URL even though body is unicameral", () => {
+    expect(stateLegBallotpediaUrl("NE", "upper", "13"))
+      .toBe("https://ballotpedia.org/Nebraska_State_Senate_District_13");
+  });
+  it("returns '#' for NE lower (no chamber)", () => {
+    expect(stateLegBallotpediaUrl("NE", "lower", "1")).toBe("#");
+  });
+  it("returns '#' for unknown state", () => {
+    expect(stateLegBallotpediaUrl("DC", "upper", "1")).toBe("#");
+    expect(stateLegBallotpediaUrl("ZZ", "upper", "1")).toBe("#");
   });
 });

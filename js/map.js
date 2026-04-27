@@ -7,6 +7,7 @@ import {
   stateStyle,
   abbrToFips,
   districtNumFromProps,
+  stateLegDistrictFromProps,
 } from "./utils.js";
 
 const BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
@@ -135,4 +136,52 @@ export function buildCdLayer(map, sourceGJ, abbr, legislators, handlers) {
     },
   }).addTo(map);
   return cdLayer;
+}
+
+/**
+ * Build a state-legislative-district layer (upper or lower chamber) for a
+ * single state. Mirrors buildCdLayer in shape — filters by STATEFP, colors
+ * each district by the resident legislator's party, dispatches click to a
+ * handler that receives the feature + the chamber.
+ *
+ * @param {object} map           Leaflet map
+ * @param {object} sourceGJ      Full SLDU or SLDL FeatureCollection
+ * @param {string} abbr          State abbr, e.g. "VA"
+ * @param {"upper"|"lower"} chamber
+ * @param {object} stateLegislators  loaded data/state_legislators.json
+ * @param {object} handlers      { click: (feat, abbr, chamber) => void }
+ * @returns {object|null} layer  null if no features for this state
+ */
+export function buildStateLegLayer(map, sourceGJ, abbr, chamber, stateLegislators, handlers) {
+  const fips = abbrToFips(abbr);
+  if (!fips) return null;
+
+  const stateFeats = sourceGJ.features.filter(
+    (f) => (f.properties.STATEFP || f.properties.statefp) === fips
+  );
+  if (!stateFeats.length) return null;
+
+  const lookup = ((stateLegislators[abbr] || {})[chamber]) || {};
+
+  let layer;
+  layer = L.geoJSON({ type: "FeatureCollection", features: stateFeats }, {
+    style(feat) {
+      const dist = stateLegDistrictFromProps(feat.properties, chamber);
+      const member = lookup[dist] || null;
+      const party = member ? (member.party || "").toLowerCase() : "";
+      // OpenStates uses "Democratic" / "Republican" / "Nonpartisan"
+      const fill = party.includes("republican") ? PARTY_COLOR.R
+                 : party.includes("democrat")   ? PARTY_COLOR.D
+                 : "#888";
+      return { fillColor: fill, fillOpacity: 0.55, color: "#fff", weight: 1.2, opacity: 1 };
+    },
+    onEachFeature(feat, leaf) {
+      leaf.on({
+        mouseover(e) { e.target.setStyle({ fillOpacity: 0.8, weight: 2.2 }); },
+        mouseout(e) { layer.resetStyle(e.target); },
+        click(e) { handlers.click(feat, abbr, chamber); L.DomEvent.stopPropagation(e); },
+      });
+    },
+  }).addTo(map);
+  return layer;
 }

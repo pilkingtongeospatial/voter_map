@@ -9,6 +9,7 @@ from transforms import (
     apply_manual_overrides,
     build_state_meta,
     flatten_legislators,
+    flatten_state_legislators,
     merge_cd_geojson,
     normalize_redistricted_feature,
 )
@@ -254,3 +255,81 @@ def test_build_meta_only_voter_reg_abbrs():
     election = {"CA": "D", "TX": "R"}  # TX should NOT appear in output
     out = build_state_meta(voter_reg, election)
     assert set(out.keys()) == {"CA"}
+
+
+# ── flatten_state_legislators ────────────────────────────────────────────────
+
+def _row(state, chamber, district, name="X", party="Democratic"):
+    return {
+        "state": state, "current_chamber": chamber,
+        "current_district": district, "name": name, "current_party": party,
+    }
+
+
+def test_flatten_sl_basic_upper_and_lower():
+    rows = [
+        _row("VA", "upper", "5",  name="Jane Doe"),
+        _row("VA", "lower", "12", name="John Smith", party="Republican"),
+    ]
+    out = flatten_state_legislators(rows)
+    assert out["VA"]["upper"]["5"] == {"name": "Jane Doe", "party": "Democratic"}
+    assert out["VA"]["lower"]["12"] == {"name": "John Smith", "party": "Republican"}
+
+
+def test_flatten_sl_nebraska_unicameral_remapped_to_upper():
+    rows = [
+        _row("NE", "legislature", "13", name="Ashlei Spivey", party="Nonpartisan"),
+    ]
+    out = flatten_state_legislators(rows)
+    assert "upper" in out["NE"]
+    assert out["NE"]["upper"]["13"] == {"name": "Ashlei Spivey", "party": "Nonpartisan"}
+    assert out["NE"].get("lower", {}) == {}
+
+
+def test_flatten_sl_skips_rows_with_missing_fields():
+    rows = [
+        _row("VA", "upper", "", name="No district"),
+        _row("VA", "upper", "5", name=""),
+        _row("VA", "", "5", name="No chamber"),
+        {"name": "no state", "current_chamber": "upper", "current_district": "5"},
+        _row("VA", "upper", "7", name="Real"),
+    ]
+    out = flatten_state_legislators(rows)
+    assert list(out.get("VA", {}).get("upper", {}).keys()) == ["7"]
+
+
+def test_flatten_sl_unknown_chamber_skipped():
+    rows = [
+        _row("VA", "council", "5", name="Council member"),
+        _row("VA", "upper", "5", name="Senator"),
+    ]
+    out = flatten_state_legislators(rows)
+    assert list(out["VA"]["upper"].keys()) == ["5"]
+    assert "council" not in out["VA"]
+
+
+def test_flatten_sl_multi_member_district_joins_names():
+    rows = [
+        _row("ND", "lower", "5", name="Alice", party="Republican"),
+        _row("ND", "lower", "5", name="Bob", party="Republican"),
+    ]
+    out = flatten_state_legislators(rows)
+    assert out["ND"]["lower"]["5"]["name"] == "Alice / Bob"
+
+
+def test_flatten_sl_party_default_when_blank():
+    rows = [_row("VA", "upper", "5", name="X", party="")]
+    out = flatten_state_legislators(rows)
+    assert out["VA"]["upper"]["5"]["party"] == "Unknown"
+
+
+def test_flatten_sl_empty_input():
+    assert flatten_state_legislators([]) == {}
+    assert flatten_state_legislators(None) == {}
+
+
+def test_flatten_sl_no_mutation():
+    rows = [_row("VA", "upper", "5", name="X")]
+    before = deepcopy(rows)
+    flatten_state_legislators(rows)
+    assert rows == before
