@@ -8,19 +8,20 @@ transformations) or prep_data.py (the orchestrator).
 # ── 2024 election results (Trump=R, Harris=D) ─────────────────────────────────
 
 ELECTION_2024 = {
-    "AL": "R", "AK": "R", "AZ": "R", "AR": "R", "CA": "D", "CO": "D", "CT": "D", "DE": "D",
-    "FL": "R", "GA": "R", "HI": "D", "ID": "R", "IL": "D", "IN": "R", "IA": "R", "KS": "R",
-    "KY": "R", "LA": "R", "ME": "D", "MD": "D", "MA": "D", "MI": "R", "MN": "D", "MS": "R",
-    "MO": "R", "MT": "R", "NE": "R", "NV": "R", "NH": "D", "NJ": "D", "NM": "D", "NY": "D",
-    "NC": "R", "ND": "R", "OH": "R", "OK": "R", "OR": "D", "PA": "R", "RI": "D", "SC": "R",
-    "SD": "R", "TN": "R", "TX": "R", "UT": "R", "VT": "D", "VA": "D", "WA": "D", "WV": "R",
-    "WI": "R", "WY": "R",
+    "AL": "R", "AK": "R", "AZ": "R", "AR": "R", "CA": "D", "CO": "D", "CT": "D", "DC": "D",
+    "DE": "D", "FL": "R", "GA": "R", "HI": "D", "ID": "R", "IL": "D", "IN": "R", "IA": "R",
+    "KS": "R", "KY": "R", "LA": "R", "ME": "D", "MD": "D", "MA": "D", "MI": "R", "MN": "D",
+    "MS": "R", "MO": "R", "MT": "R", "NE": "R", "NV": "R", "NH": "D", "NJ": "D", "NM": "D",
+    "NY": "D", "NC": "R", "ND": "R", "OH": "R", "OK": "R", "OR": "D", "PA": "R", "RI": "D",
+    "SC": "R", "SD": "R", "TN": "R", "TX": "R", "UT": "R", "VT": "D", "VA": "D", "WA": "D",
+    "WV": "R", "WI": "R", "WY": "R",
 }
 
 # ── voter registration links ──────────────────────────────────────────────────
 
 VOTER_REG = {
     "AL": {"url": "https://www.sos.alabama.gov/alabama-votes/voter/register-to-vote", "name": "Alabama Voter Registration"},
+    "DC": {"url": "https://www.dcboe.org/Voters/Register-To-Vote", "name": "DC Voter Registration"},
     "AK": {"url": "https://voterregistration.alaska.gov/", "name": "Alaska Voter Registration"},
     "AZ": {"url": "https://servicearizona.com/VoterRegistration/", "name": "Arizona Voter Registration"},
     "AR": {"url": "https://www.sos.arkansas.gov/elections/voter-information/voter-registration", "name": "Arkansas Voter Registration"},
@@ -89,21 +90,40 @@ REDISTRICTED = {
 
 STATE_NAME_TO_ABBR = {
     "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
-    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA",
-    "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA",
-    "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
-    "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
-    "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
-    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
-    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
-    "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
-    "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT",
-    "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI",
-    "Wyoming": "WY",
+    "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "District of Columbia": "DC",
+    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL",
+    "Indiana": "IN", "Iowa": "IA", "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA",
+    "Maine": "ME", "Maryland": "MD", "Massachusetts": "MA", "Michigan": "MI",
+    "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO", "Montana": "MT",
+    "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ",
+    "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND",
+    "Ohio": "OH", "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA",
+    "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", "Tennessee": "TN",
+    "Texas": "TX", "Utah": "UT", "Vermont": "VT", "Virginia": "VA", "Washington": "WA",
+    "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY",
 }
 
 # Inverted lookup (computed once at module load)
 ABBR_TO_STATE_NAME = {abbr: name for name, abbr in STATE_NAME_TO_ABBR.items()}
+
+# ── FIPS code lookups ─────────────────────────────────────────────────────────
+# Mirrors js/constants.js::FIPS_TO_ABBR / ABBR_TO_FIPS
+
+FIPS_TO_ABBR = {
+    "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
+    "08": "CO", "09": "CT", "10": "DE", "11": "DC", "12": "FL",
+    "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN",
+    "19": "IA", "20": "KS", "21": "KY", "22": "LA", "23": "ME",
+    "24": "MD", "25": "MA", "26": "MI", "27": "MN", "28": "MS",
+    "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH",
+    "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND",
+    "39": "OH", "40": "OK", "41": "OR", "42": "PA", "44": "RI",
+    "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT",
+    "50": "VT", "51": "VA", "53": "WA", "54": "WV", "55": "WI",
+    "56": "WY",
+}
+
+ABBR_TO_FIPS = {abbr: fips for fips, abbr in FIPS_TO_ABBR.items()}
 
 # ── state legislature naming + URL metadata ──────────────────────────────────
 # Per-state names of the legislative body and its chambers, plus Ballotpedia
