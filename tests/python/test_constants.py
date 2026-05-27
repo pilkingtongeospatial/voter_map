@@ -5,6 +5,7 @@ from constants import (
     ELECTION_2024,
     MANUAL_REPS,
     REDISTRICTED,
+    STATE_LEGISLATURE_META,
     STATE_NAME_TO_ABBR,
     VOTER_REG,
 )
@@ -17,18 +18,20 @@ ALL_50 = {
     "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
     "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 }
+# DC is included alongside the 50 states in election + voter-reg data.
+ALL_50_PLUS_DC = ALL_50 | {"DC"}
 
 
-def test_election_2024_has_all_50_states():
-    assert set(ELECTION_2024.keys()) == ALL_50
+def test_election_2024_has_all_50_states_and_dc():
+    assert set(ELECTION_2024.keys()) == ALL_50_PLUS_DC
 
 
 def test_election_2024_values_are_r_or_d():
     assert all(v in ("R", "D") for v in ELECTION_2024.values())
 
 
-def test_voter_reg_has_all_50_states():
-    assert set(VOTER_REG.keys()) == ALL_50
+def test_voter_reg_has_all_50_states_and_dc():
+    assert set(VOTER_REG.keys()) == ALL_50_PLUS_DC
 
 
 def test_voter_reg_entries_have_url_and_name():
@@ -38,8 +41,8 @@ def test_voter_reg_entries_have_url_and_name():
         assert entry["url"].startswith(("http://", "https://")), f"{abbr} has non-http url"
 
 
-def test_state_name_to_abbr_has_all_50_states():
-    assert set(STATE_NAME_TO_ABBR.values()) == ALL_50
+def test_state_name_to_abbr_has_all_50_states_and_dc():
+    assert set(STATE_NAME_TO_ABBR.values()) == ALL_50_PLUS_DC
 
 
 def test_state_name_to_abbr_no_collisions():
@@ -83,3 +86,85 @@ def test_manual_reps_keys_are_tuples():
 def test_manual_reps_values_have_name():
     for key, value in MANUAL_REPS.items():
         assert "name" in value, f"{key} override missing name"
+
+
+# ── STATE_LEGISLATURE_META ───────────────────────────────────────────────────
+
+LEG_REQUIRED_KEYS = {
+    "body", "body_url_slug",
+    "upper_chamber", "upper_member", "upper_url_slug",
+    "lower_chamber", "lower_member", "lower_url_slug",
+}
+
+
+def test_legislature_meta_covers_all_50_states():
+    assert set(STATE_LEGISLATURE_META.keys()) == ALL_50
+
+
+def test_legislature_meta_has_all_required_keys():
+    for abbr, meta in STATE_LEGISLATURE_META.items():
+        missing = LEG_REQUIRED_KEYS - set(meta.keys())
+        assert not missing, f"{abbr} missing keys: {missing}"
+
+
+def test_legislature_meta_required_strings_non_empty():
+    """Every state must have non-empty body, upper_chamber, upper_member, upper_url_slug."""
+    for abbr, meta in STATE_LEGISLATURE_META.items():
+        for key in ("body", "body_url_slug", "upper_chamber", "upper_member", "upper_url_slug"):
+            assert meta[key], f"{abbr}.{key} is empty"
+
+
+def test_legislature_meta_url_slugs_are_underscored():
+    """No spaces in url slugs (Ballotpedia uses underscored names)."""
+    for abbr, meta in STATE_LEGISLATURE_META.items():
+        for key in ("body_url_slug", "upper_url_slug"):
+            assert " " not in meta[key], f"{abbr}.{key} contains space"
+        if meta["lower_url_slug"]:
+            assert " " not in meta["lower_url_slug"]
+
+
+def test_legislature_meta_nebraska_is_unicameral():
+    ne = STATE_LEGISLATURE_META["NE"]
+    assert ne["lower_chamber"] is None
+    assert ne["lower_member"] is None
+    assert ne["lower_url_slug"] is None
+    # Body is "Nebraska Legislature"
+    assert "Legislature" in ne["body"]
+
+
+def test_legislature_meta_other_states_have_lower_chamber():
+    """Every state except Nebraska must have a lower chamber."""
+    for abbr, meta in STATE_LEGISLATURE_META.items():
+        if abbr == "NE":
+            continue
+        assert meta["lower_chamber"], f"{abbr} unexpectedly has no lower_chamber"
+        assert meta["lower_member"], f"{abbr} missing lower_member"
+        assert meta["lower_url_slug"], f"{abbr} missing lower_url_slug"
+
+
+def test_legislature_meta_member_titles_are_known():
+    """Member titles should be one of the standard forms."""
+    known = {"Senator", "Representative", "Delegate", "Assemblymember"}
+    for abbr, meta in STATE_LEGISLATURE_META.items():
+        assert meta["upper_member"] in known, f"{abbr} upper_member={meta['upper_member']!r}"
+        if meta["lower_member"]:
+            assert meta["lower_member"] in known, f"{abbr} lower_member={meta['lower_member']!r}"
+
+
+def test_legislature_meta_specific_state_facts():
+    """Spot-check a few states whose names matter most for correctness."""
+    m = STATE_LEGISLATURE_META
+    assert m["VA"]["body"] == "Virginia General Assembly"
+    assert m["VA"]["upper_chamber"] == "Senate of Virginia"
+    assert m["VA"]["lower_chamber"] == "Virginia House of Delegates"
+    assert m["VA"]["lower_member"] == "Delegate"
+    assert m["MA"]["body"] == "Massachusetts General Court"
+    assert m["NH"]["body"] == "New Hampshire General Court"
+    assert m["ND"]["body"] == "North Dakota Legislative Assembly"
+    assert m["OR"]["body"] == "Oregon Legislative Assembly"
+    assert m["CA"]["lower_chamber"] == "California State Assembly"
+    assert m["CA"]["lower_member"] == "Assemblymember"
+    assert m["NJ"]["lower_chamber"] == "New Jersey General Assembly"
+    assert m["NJ"]["lower_member"] == "Assemblymember"
+    assert m["MD"]["lower_member"] == "Delegate"
+    assert m["WV"]["lower_member"] == "Delegate"

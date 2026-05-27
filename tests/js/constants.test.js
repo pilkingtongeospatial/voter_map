@@ -7,6 +7,7 @@ import {
   ABBR_TO_FIPS,
   STATE_CENTROIDS,
   ABBR_TO_BALLOTPEDIA_STATE,
+  STATE_LEGISLATURE_META,
 } from "../../js/constants.js";
 
 const ALL_50 = new Set([
@@ -81,5 +82,59 @@ describe("ABBR_TO_BALLOTPEDIA_STATE", () => {
   });
   it("covers all 50 states", () => {
     for (const abbr of ALL_50) expect(ABBR_TO_BALLOTPEDIA_STATE[abbr]).toBeDefined();
+  });
+});
+
+describe("STATE_LEGISLATURE_META", () => {
+  const REQUIRED = [
+    "body", "body_url_slug",
+    "upper_chamber", "upper_member", "upper_url_slug",
+    "lower_chamber", "lower_member", "lower_url_slug",
+  ];
+
+  it("covers all 50 states", () => {
+    for (const abbr of ALL_50) expect(STATE_LEGISLATURE_META[abbr]).toBeDefined();
+  });
+  it("every state has all required keys", () => {
+    for (const [abbr, meta] of Object.entries(STATE_LEGISLATURE_META)) {
+      for (const k of REQUIRED) expect(meta).toHaveProperty(k);
+    }
+  });
+  it("required upper-chamber strings are non-empty for every state", () => {
+    for (const [abbr, meta] of Object.entries(STATE_LEGISLATURE_META)) {
+      expect(meta.body, abbr).toBeTruthy();
+      expect(meta.upper_chamber, abbr).toBeTruthy();
+      expect(meta.upper_member, abbr).toBeTruthy();
+      expect(meta.upper_url_slug, abbr).toBeTruthy();
+    }
+  });
+  it("Nebraska is unicameral (lower_* are null)", () => {
+    expect(STATE_LEGISLATURE_META.NE.lower_chamber).toBeNull();
+    expect(STATE_LEGISLATURE_META.NE.lower_member).toBeNull();
+    expect(STATE_LEGISLATURE_META.NE.lower_url_slug).toBeNull();
+  });
+  it("every other state has a lower chamber", () => {
+    for (const [abbr, meta] of Object.entries(STATE_LEGISLATURE_META)) {
+      if (abbr === "NE") continue;
+      expect(meta.lower_chamber, abbr).toBeTruthy();
+      expect(meta.lower_member, abbr).toBeTruthy();
+      expect(meta.lower_url_slug, abbr).toBeTruthy();
+    }
+  });
+  it("URL slugs are underscored (no spaces)", () => {
+    for (const [abbr, meta] of Object.entries(STATE_LEGISLATURE_META)) {
+      expect(meta.body_url_slug.includes(" "), abbr).toBe(false);
+      expect(meta.upper_url_slug.includes(" "), abbr).toBe(false);
+      if (meta.lower_url_slug) {
+        expect(meta.lower_url_slug.includes(" "), abbr).toBe(false);
+      }
+    }
+  });
+  it("spot-check Virginia has correct names", () => {
+    const m = STATE_LEGISLATURE_META.VA;
+    expect(m.body).toBe("Virginia General Assembly");
+    expect(m.upper_chamber).toBe("Senate of Virginia");
+    expect(m.lower_chamber).toBe("Virginia House of Delegates");
+    expect(m.lower_member).toBe("Delegate");
   });
 });
