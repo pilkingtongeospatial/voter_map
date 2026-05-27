@@ -1,9 +1,10 @@
 """
 Voter Map Data Preparation Script (orchestrator)
 
-Downloads and processes all data needed for the US Voter Information Map.
+Downloads and processes all data needed for the US Voter Information Map,
+then loads everything into a local PostGIS database.
 
-Produces:
+Produces (files):
   data/states.geojson                        State boundaries + 2024 election results
   data/congressional_districts_119.geojson   119th Congress district boundaries (current)
   data/congressional_districts.geojson       2026 expected districts (119th + 2025 redistricting)
@@ -12,6 +13,12 @@ Produces:
   data/legislators.json                      Current US Congress legislators by state
   data/state_legislators.json                Current state legislators by state + chamber + district
   data/state_meta.json                       Voter registration links + election results
+
+Produces (database):
+  Schema voter_map_states in the database specified by DATABASE_URL env var
+  (default: postgresql://localhost/voter_map).  Tables: us_states, legislators,
+  congressional_districts_119, congressional_districts, state_leg_upper,
+  state_leg_lower, state_meta, state_legislators.
 
 Note: 2025 redistricting ZIP files for CA, MO, NC, OH, TX, UT are auto-downloaded
 from the American Redistricting Project (URLs in constants.py::REDISTRICTED) and
@@ -40,6 +47,9 @@ from constants import (  # noqa: E402
     STATE_LEGISLATURE_META,
     STATE_NAME_TO_ABBR,
     MANUAL_REPS,
+    ABBR_TO_FIPS,
+    FIPS_TO_ABBR,
+    ABBR_TO_STATE_NAME,
 )
 from io_helpers import (  # noqa: E402
     download,
@@ -60,7 +70,7 @@ from transforms import (  # noqa: E402
 )
 
 
-# ── lazy pyshp / pyyaml import (installs if missing) ─────────────────────────
+# ── lazy dependency installation ──────────────────────────────────────────────
 
 def _ensure_deps():
     """Install pyshp and pyyaml if they aren't importable."""
@@ -74,6 +84,36 @@ def _ensure_deps():
     except ImportError:
         print("Installing pyyaml...")
         pip_install("pyyaml")
+
+
+def _ensure_db_deps():
+    """Install sqlalchemy, psycopg2-binary, and shapely if absent.
+
+    greenlet (a sqlalchemy dependency) must be installed as a binary wheel on
+    Windows — it requires a C++ compiler to build from source, which is rarely
+    present. We install it explicitly with --only-binary before sqlalchemy so
+    pip doesn't attempt a source build.
+    """
+    import subprocess as _sp
+    try:
+        import greenlet  # noqa: F401
+    except ImportError:
+        print("Installing greenlet (binary wheel)...")
+        _sp.check_call(
+            [sys.executable, "-m", "pip", "install", "greenlet",
+             "--only-binary", ":all:", "-q"]
+        )
+
+    for pkg, import_name in [
+        ("sqlalchemy", "sqlalchemy"),
+        ("psycopg2-binary", "psycopg2"),
+        ("shapely", "shapely"),
+    ]:
+        try:
+            __import__(import_name)
+        except ImportError:
+            print(f"Installing {pkg}...")
+            pip_install(pkg)
 
 
 # ── pipeline stages ───────────────────────────────────────────────────────────
@@ -254,6 +294,91 @@ def stage_state_meta(data_dir):
     print(f"  Saved metadata for {len(meta)} states -> data/state_meta.json")
 
 
+def stage_db(data_dir):
+    """Read processed data files and load into PostGIS (schema voter_map_states)."""
+    import json as _json
+
+    from db_helpers import (
+        get_engine,
+        create_schema_and_tables,
+        create_indices,
+        insert_us_states,
+        insert_legislators,
+        insert_congressional_districts_119,
+        insert_congressional_districts,
+        insert_state_leg_upper,
+        insert_state_leg_lower,
+        insert_state_meta,
+        insert_state_legislators,
+    )
+
+    def _load(name):
+        with open(os.path.join(data_dir, name)) as f:
+            return _json.load(f)
+
+    print("\n[DB] Connecting to database…")
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+    except Exception as exc:
+        print(f"  ERROR: cannot connect to database.\n  {exc}")
+        print(
+            "  Make sure PostgreSQL is running and DATABASE_URL is correct.\n"
+            f"  Current DATABASE_URL: {__import__('os').environ.get('DATABASE_URL', 'postgresql://localhost/voter_map')}"
+        )
+        raise SystemExit(1)
+
+    print("[DB] Creating schema and tables…")
+    create_schema_and_tables(engine)
+
+    print("[DB] Inserting us_states…")
+    states_gj = _load("states.geojson")
+    n = insert_us_states(engine, states_gj, VOTER_REG, ABBR_TO_FIPS)
+    print(f"  {n} states")
+
+    print("[DB] Inserting legislators…")
+    legislators = _load("legislators.json")
+    n = insert_legislators(engine, legislators, ABBR_TO_FIPS, ABBR_TO_STATE_NAME)
+    print(f"  {n} legislator rows")
+
+    valid_fips = set(ABBR_TO_FIPS.values())
+
+    print("[DB] Inserting congressional_districts_119…")
+    cd119_gj = _load("congressional_districts_119.geojson")
+    n = insert_congressional_districts_119(engine, cd119_gj, valid_fips=valid_fips)
+    print(f"  {n} districts")
+
+    print("[DB] Inserting congressional_districts (2026)…")
+    cd_gj = _load("congressional_districts.geojson")
+    n = insert_congressional_districts(engine, cd_gj, valid_fips=valid_fips)
+    print(f"  {n} districts")
+
+    print("[DB] Inserting state_leg_upper…")
+    sldu_gj = _load("state_leg_upper.geojson")
+    n = insert_state_leg_upper(engine, sldu_gj, FIPS_TO_ABBR, ABBR_TO_STATE_NAME)
+    print(f"  {n} districts")
+
+    print("[DB] Inserting state_leg_lower…")
+    sldl_gj = _load("state_leg_lower.geojson")
+    n = insert_state_leg_lower(engine, sldl_gj, FIPS_TO_ABBR, ABBR_TO_STATE_NAME)
+    print(f"  {n} districts")
+
+    print("[DB] Inserting state_meta…")
+    state_meta = _load("state_meta.json")
+    n = insert_state_meta(engine, state_meta, ABBR_TO_FIPS)
+    print(f"  {n} states")
+
+    print("[DB] Inserting state_legislators…")
+    state_legislators = _load("state_legislators.json")
+    n = insert_state_legislators(engine, state_legislators, ABBR_TO_FIPS, ABBR_TO_STATE_NAME)
+    print(f"  {n} legislator rows")
+
+    print("[DB] Building spatial and attribute indices…")
+    create_indices(engine)
+    print("  Done.")
+
+
 def _print_summary(data_dir):
     print("\nAll data preparation complete!")
     print(f"Data directory: {data_dir}")
@@ -277,6 +402,7 @@ def _print_summary(data_dir):
 
 def main():
     _ensure_deps()
+    _ensure_db_deps()
     root_dir = os.path.dirname(_SCRIPT_DIR)
     data_dir = os.path.join(root_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -289,6 +415,7 @@ def main():
     stage_state_legislators(data_dir)
     stage_state_meta(data_dir)
     _print_summary(data_dir)
+    stage_db(data_dir)
 
 
 if __name__ == "__main__":
