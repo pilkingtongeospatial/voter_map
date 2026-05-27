@@ -18,18 +18,20 @@ ALL_50 = {
     "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
     "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 }
+# DC is included alongside the 50 states in election + voter-reg data.
+ALL_50_PLUS_DC = ALL_50 | {"DC"}
 
 
-def test_election_2024_has_all_50_states():
-    assert set(ELECTION_2024.keys()) == ALL_50
+def test_election_2024_has_all_50_states_and_dc():
+    assert set(ELECTION_2024.keys()) == ALL_50_PLUS_DC
 
 
 def test_election_2024_values_are_r_or_d():
     assert all(v in ("R", "D") for v in ELECTION_2024.values())
 
 
-def test_voter_reg_has_all_50_states():
-    assert set(VOTER_REG.keys()) == ALL_50
+def test_voter_reg_has_all_50_states_and_dc():
+    assert set(VOTER_REG.keys()) == ALL_50_PLUS_DC
 
 
 def test_voter_reg_entries_have_url_and_name():
@@ -39,8 +41,8 @@ def test_voter_reg_entries_have_url_and_name():
         assert entry["url"].startswith(("http://", "https://")), f"{abbr} has non-http url"
 
 
-def test_state_name_to_abbr_has_all_50_states():
-    assert set(STATE_NAME_TO_ABBR.values()) == ALL_50
+def test_state_name_to_abbr_has_all_50_states_and_dc():
+    assert set(STATE_NAME_TO_ABBR.values()) == ALL_50_PLUS_DC
 
 
 def test_state_name_to_abbr_no_collisions():
