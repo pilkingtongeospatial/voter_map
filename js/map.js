@@ -9,9 +9,9 @@ import {
   districtNumFromProps,
 } from "./utils.js";
 
-const BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
+const BASEMAP_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const BASEMAP_ATTR =
-  '&copy; <a href="https://carto.com/">CARTO</a> | US Census TIGER | congress-legislators';
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | US Census TIGER | congress-legislators';
 
 /**
  * Create the three Leaflet map instances. Returns { map, akMap, hiMap }.
@@ -23,7 +23,7 @@ export function initMaps() {
     zoomControl: true, attributionControl: true,
   });
   L.tileLayer(BASEMAP_URL, {
-    attribution: BASEMAP_ATTR, subdomains: "abcd", maxZoom: 19,
+    attribution: BASEMAP_ATTR, maxZoom: 19,
   }).addTo(map);
 
   const insetOpts = {
@@ -34,10 +34,10 @@ export function initMaps() {
   };
 
   const akMap = L.map("inset-ak", { center: [64, -153], zoom: 2, ...insetOpts });
-  L.tileLayer(BASEMAP_URL, { subdomains: "abcd", maxZoom: 19 }).addTo(akMap);
+  L.tileLayer(BASEMAP_URL, { maxZoom: 19 }).addTo(akMap);
 
   const hiMap = L.map("inset-hi", { center: [20.5, -157], zoom: 5, ...insetOpts });
-  L.tileLayer(BASEMAP_URL, { subdomains: "abcd", maxZoom: 19 }).addTo(hiMap);
+  L.tileLayer(BASEMAP_URL, { maxZoom: 19 }).addTo(hiMap);
 
   return { map, akMap, hiMap };
 }
